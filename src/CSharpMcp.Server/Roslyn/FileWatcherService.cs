@@ -11,18 +11,18 @@ internal sealed class FileWatcherService : IDisposable
     private readonly System.Threading.Timer _debounceTimer;
     private readonly string _solutionPath;
     private readonly string _solutionDirectory;
-    private readonly Func<FileChangeType, string, CancellationToken, Task> _onFileChanged;
+    private readonly Func<IReadOnlyDictionary<string, FileChangeType>, CancellationToken, Task> _onFileChanged;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _processingLock = new(1, 1);
     private readonly object _pendingChangesLock = new();
 
-    private readonly HashSet<string> _pendingFilePaths = new();
+    private readonly Dictionary<string, FileChangeType> _pendingFileChanges = new();
     private bool _disposed;
 
     public FileWatcherService(
         string solutionPath,
         string solutionDirectory,
-        Func<FileChangeType, string, CancellationToken, Task> onFileChanged,
+        Func<IReadOnlyDictionary<string, FileChangeType>, CancellationToken, Task> onFileChanged,
         ILogger logger)
     {
         _solutionPath = solutionPath;
@@ -96,7 +96,7 @@ internal sealed class FileWatcherService : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            _pendingFilePaths.Add(filePath);
+            _pendingFileChanges[filePath] = changeType;
         }
 
         // 重置防抖定时器（1秒后执行）
@@ -112,17 +112,17 @@ internal sealed class FileWatcherService : IDisposable
             return;
 
         // 获取所有待处理的文件（在锁内复制并清空）
-        string[] filesToProcess;
+        Dictionary<string, FileChangeType> changesToProcess;
         lock (_pendingChangesLock)
         {
-            if (_pendingFilePaths.Count == 0)
+            if (_pendingFileChanges.Count == 0)
                 return;
 
-            filesToProcess = _pendingFilePaths.ToArray();
-            _pendingFilePaths.Clear();
+            changesToProcess = new Dictionary<string, FileChangeType>(_pendingFileChanges);
+            _pendingFileChanges.Clear();
         }
 
-        _logger.LogInformation("Processing {Count} file change(s)", filesToProcess.Length);
+        _logger.LogInformation("Processing {Count} file change(s)", changesToProcess.Count);
 
         // 确保不会同时处理多个变化
         if (!_processingLock.Wait(0))
@@ -133,27 +133,19 @@ internal sealed class FileWatcherService : IDisposable
             // 在后台线程中执行异步操作
             _ = Task.Run(async () =>
             {
-                foreach (var filePath in filesToProcess)
+                try
                 {
-                    try
-                    {
-                        var changeType = GetChangeType(filePath);
-                        if (changeType.HasValue)
-                        {
-                            _logger.LogInformation("Processing file change: {Type} - {Path}", changeType.Value, filePath);
-                            await _onFileChanged(changeType.Value, filePath, CancellationToken.None);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error processing file change: {Path}", filePath);
-                    }
+                    await _onFileChanged(changesToProcess, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing file changes");
                 }
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing file changes");
+            _logger.LogError(ex, "Error scheduling file change processing");
         }
         finally
         {
