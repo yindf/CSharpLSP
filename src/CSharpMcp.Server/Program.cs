@@ -1,3 +1,5 @@
+﻿using System;
+using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -22,6 +24,9 @@ public class Program
         {
             consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace;
         });
+
+        // Add file logging for debugging
+        builder.Logging.AddProvider(new FileLoggerProvider("C:/Project/CSharpMcp/mcp.log"));
 
         // Core services (injected into tool methods by MCP SDK)
         builder.Services.AddSingleton<IWorkspaceManager, WorkspaceManager>();

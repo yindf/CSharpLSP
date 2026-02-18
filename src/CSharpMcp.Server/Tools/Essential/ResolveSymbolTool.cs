@@ -1,3 +1,9 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
@@ -38,8 +44,9 @@ public class ResolveSymbolTool
             var (symbol, document) = await ResolveSymbolAsync(parameters, workspaceManager, symbolAnalyzer, cancellationToken);
             if (symbol == null)
             {
-                logger.LogWarning("Symbol not found: {SymbolName}", parameters.SymbolName ?? "at specified location");
-                throw new FileNotFoundException($"Symbol not found: {parameters.SymbolName ?? "at specified location"}");
+                var errorDetails = BuildErrorDetails(parameters, workspaceManager, cancellationToken);
+                logger.LogWarning("Symbol not found: {Details}", errorDetails);
+                throw new FileNotFoundException(errorDetails);
             }
 
             // Get symbol info
@@ -170,5 +177,57 @@ public class ResolveSymbolTool
         }
 
         return (symbol, document);
+    }
+
+    private static string BuildErrorDetails(
+        ResolveSymbolParams parameters,
+        IWorkspaceManager workspaceManager,
+        CancellationToken cancellationToken)
+    {
+        var details = new System.Text.StringBuilder();
+        details.AppendLine("## Symbol Not Found");
+        details.AppendLine();
+        details.AppendLine($"**File**: `{parameters.FilePath}`");
+        details.AppendLine($"**Line Number**: {parameters.LineNumber?.ToString() ?? "Not specified"}");
+        details.AppendLine($"**Symbol Name**: `{parameters.SymbolName ?? "Not specified"}`");
+        details.AppendLine();
+
+        // 尝试读取文件内容显示该行
+        try
+        {
+            var document = workspaceManager.CurrentSolution?.Projects
+                .SelectMany(p => p.Documents)
+                .FirstOrDefault(d => d.FilePath == parameters.FilePath);
+
+            if (document != null && parameters.LineNumber.HasValue)
+            {
+                var sourceText = document.GetTextAsync(cancellationToken).GetAwaiter().GetResult();
+                if (sourceText != null)
+                {
+                    var line = sourceText.Lines.FirstOrDefault(l => l.LineNumber == parameters.LineNumber.Value - 1);
+                    if (line.LineNumber >= 0)
+                    {
+                        details.AppendLine("**Line Content**:");
+                        details.AppendLine("```csharp");
+                        details.AppendLine(line.ToString().Trim());
+                        details.AppendLine("```");
+                        details.AppendLine();
+                    }
+                }
+            }
+        }
+        catch
+        {
+            details.AppendLine("**Line Content**: Unable to read file content");
+            details.AppendLine();
+        }
+
+        details.AppendLine("**Possible Reasons**:");
+        details.AppendLine("1. The symbol is defined in an external library (not in this workspace)");
+        details.AppendLine("2. The symbol is a built-in C# type or keyword");
+        details.AppendLine("3. The file path or line number is incorrect");
+        details.AppendLine("4. The workspace needs to be reloaded (try LoadWorkspace again)");
+
+        return details.ToString();
     }
 }

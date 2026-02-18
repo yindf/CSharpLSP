@@ -1,7 +1,11 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging;
-using System.Threading;
 
 namespace CSharpMcp.Server.Roslyn;
 
@@ -60,7 +64,7 @@ internal sealed partial class WorkspaceManager
 
         try
         {
-            _logger.LogInformation("Processing {Count} file change(s)", fileChanges.Count);
+            _logger.LogInformation("Processing {Count} file change(s): {Files}", fileChanges.Count, string.Join(", ", fileChanges.Keys));
 
             Solution newSolution;
             bool applied;
@@ -98,7 +102,7 @@ internal sealed partial class WorkspaceManager
                 _currentSolution = newSolution;
                 _compilationCache.Clear();
                 _lastUpdate = DateTime.UtcNow;
-                _logger.LogInformation("Successfully applied {Count} file change(s)", fileChanges.Count);
+                _logger.LogInformation("Successfully applied {Count} file change(s): {Files}", fileChanges.Count, string.Join(", ", fileChanges.Keys));
             }
         }
         catch (Exception ex)
@@ -180,7 +184,7 @@ internal sealed partial class WorkspaceManager
                         continue;
                     }
 
-                    var sourceText = SourceText.From(File.ReadAllText(filePath), encoding: System.Text.Encoding.UTF8);
+                    var sourceText = SourceText.From(await File.ReadAllTextAsync(filePath, cancellationToken), encoding: System.Text.Encoding.UTF8);
                     documentUpdates.Add((documentIds[0], sourceText));
                 }
 

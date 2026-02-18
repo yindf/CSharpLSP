@@ -1,3 +1,4 @@
+﻿using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
 
 namespace CSharpMcp.Server.Models;
@@ -42,6 +43,8 @@ public record SymbolReference(
 /// </summary>
 public record SymbolInfo
 {
+
+
     public required string Name { get; init; }
     public required SymbolKind Kind { get; init; }
     public required SymbolLocation Location { get; init; }
@@ -80,4 +83,9 @@ public record SymbolInfo
     public bool IsAbstract { get; init; }
     public bool IsAsync { get; init; }
     public Accessibility Accessibility { get; init; } = Accessibility.NotApplicable;
+
+    /// <summary>
+    /// Test field added for verification - should be found by csharp-ls search
+    /// </summary>
+    public string TestFieldForSearch { get; init; } = string.Empty;
 }

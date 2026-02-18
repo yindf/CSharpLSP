@@ -1,3 +1,9 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.Extensions.Logging;
@@ -401,7 +407,7 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
 
         try
         {
-            // Reload the workspace
+            // Reopen the solution to refresh MSBuildWorkspace's internal cache
             if (File.Exists(_loadedPath))
             {
                 var extension = Path.GetExtension(_loadedPath).ToLowerInvariant();
@@ -417,6 +423,7 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
             }
 
             _lastUpdate = DateTime.UtcNow;
+            _logger.LogInformation("Workspace refreshed successfully");
         }
         catch (Exception ex)
         {

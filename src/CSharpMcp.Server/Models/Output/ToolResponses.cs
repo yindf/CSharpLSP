@@ -1,7 +1,9 @@
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using CSharpMcp.Server.Models;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
-using System.Text;
 
 namespace CSharpMcp.Server.Models.Output;
 
@@ -544,7 +546,10 @@ public record GetTypeMembersResponse(
                         signature = $" `{returnType}{displayName}{paramsStr}`";
                     }
 
+
                     sb.AppendLine($"- **{displayName}** ({member.Accessibility} {modifierStr}{member.Kind}) - L{member.Location.StartLine}-{member.Location.EndLine}{signature}");
+
+
                 }
                 sb.AppendLine();
             }

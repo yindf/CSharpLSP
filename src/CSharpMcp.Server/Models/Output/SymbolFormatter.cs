@@ -1,7 +1,9 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using CSharpMcp.Server.Models;
 using Microsoft.CodeAnalysis;
-using System.Text;
-using System.Linq;
 
 namespace CSharpMcp.Server.Models.Output;
 
@@ -46,6 +48,24 @@ public static class SymbolFormatter
     /// </summary>
     public static string GetSignatureString(SymbolInfo symbol)
     {
+        Microsoft.CodeAnalysis.SymbolInfo symbolInfo = default;
+        switch (symbolInfo.Symbol)
+        {
+            case IFieldSymbol fieldSymbol:
+                // fieldSymbol.Name, fieldSymbol.Type etc
+                break;
+            case IMethodSymbol methodSymbol:
+                // methodSymbol.Parameters, methodSymbol.ReturnType etc
+                break;
+            case IPropertySymbol propertySymbol:
+                // propertySymbol.Name, propertySymbol.Type etc
+                break;
+            case INamedTypeSymbol namedTypeSymbol:
+                // namedTypeSymbol.Interfaces, namedTypeSymbol.GetMembers(), etc
+                break;
+        }
+
+
         if (symbol.Signature == null)
             return "";
 
@@ -55,8 +75,8 @@ public static class SymbolFormatter
             ? $"({string.Join(", ", symbol.Signature.Parameters)})"
             : "()";
 
-        return symbol.Kind == SymbolKind.Property
-            ? $"{displayName}{paramsStr}"
+        return symbol.Kind == SymbolKind.Property || symbol.Kind == SymbolKind.Field
+            ? $"{displayName}{symbol.Signature}"
             : $"{returnType}{displayName}{paramsStr}";
     }
 
@@ -297,6 +317,15 @@ public static class SymbolFormatter
         }
 
         return sb.ToString();
+    }
+
+    public static string FormatSymbolsGroupedByFile(
+        IReadOnlyList<SymbolReference> symbolRefs,
+        SymbolDetailLevel detailLevel = SymbolDetailLevel.Simplified,
+        bool includeBody = true,
+        int? bodyMaxLines = null)
+    {
+
     }
 
     /// <summary>

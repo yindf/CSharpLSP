@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using CSharpMcp.Server.Models;
 
 namespace CSharpMcp.Server.Models.Tools;

@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 
 namespace CSharpMcp.Server.Cache;
