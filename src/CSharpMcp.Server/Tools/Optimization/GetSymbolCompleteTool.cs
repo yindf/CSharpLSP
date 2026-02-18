@@ -90,102 +90,93 @@ public class GetSymbolCompleteTool
         sb.AppendLine();
 
         // ========== Basic Info Section ==========
-        if (parameters.Sections.HasFlag(SymbolCompleteSections.Basic))
+        sb.AppendLine("## Basic Information");
+        sb.AppendLine();
+        sb.AppendLine($"- **Name**: `{displayName}`");
+        sb.AppendLine($"- **Kind**: {kind}");
+        sb.AppendLine($"- **Accessibility**: {symbol.GetAccessibilityString()}");
+
+        var containingType = symbol.GetContainingTypeName();
+        if (!string.IsNullOrEmpty(containingType))
+            sb.AppendLine($"- **Containing Type**: {containingType}");
+
+        var ns = symbol.GetNamespace();
+        if (!string.IsNullOrEmpty(ns))
+            sb.AppendLine($"- **Namespace**: {ns}");
+
+        if (startLine > 0)
         {
-            sb.AppendLine("## Basic Information");
-            sb.AppendLine();
-            sb.AppendLine($"- **Name**: `{displayName}`");
-            sb.AppendLine($"- **Kind**: {kind}");
-            sb.AppendLine($"- **Accessibility**: {symbol.GetAccessibilityString()}");
-
-            var containingType = symbol.GetContainingTypeName();
-            if (!string.IsNullOrEmpty(containingType))
-                sb.AppendLine($"- **Containing Type**: {containingType}");
-
-            var ns = symbol.GetNamespace();
-            if (!string.IsNullOrEmpty(ns))
-                sb.AppendLine($"- **Namespace**: {ns}");
-
-            if (startLine > 0)
-            {
-                var fileName = System.IO.Path.GetFileName(filePath);
-                sb.AppendLine($"- **Location**: `{fileName}:{startLine}-{endLine}`");
-            }
-
-            var signature = symbol.GetSignature();
-            if (!string.IsNullOrEmpty(signature))
-            {
-                sb.AppendLine($"- **Signature**: `{signature}`");
-            }
-
-            var modifiers = new List<string>();
-            if (symbol.IsStatic) modifiers.Add("static");
-            if (symbol.IsVirtual) modifiers.Add("virtual");
-            if (symbol.IsOverride) modifiers.Add("override");
-            if (symbol.IsAbstract) modifiers.Add("abstract");
-            if (modifiers.Count > 0)
-            {
-                sb.AppendLine($"- **Modifiers**: {string.Join(", ", modifiers)}");
-            }
-
-            sb.AppendLine();
+            var fileName = System.IO.Path.GetFileName(filePath);
+            sb.AppendLine($"- **Location**: `{fileName}:{startLine}-{endLine}`");
         }
 
-        // ========== Documentation Section ==========
-        if (parameters.Sections.HasFlag(SymbolCompleteSections.Documentation))
+        var signature = symbol.GetSignature();
+        if (!string.IsNullOrEmpty(signature))
         {
-            var summary = symbol.GetSummaryComment();
-            var fullComment = symbol.GetFullComment();
+            sb.AppendLine($"- **Signature**: `{signature}`");
+        }
 
-            if (!string.IsNullOrEmpty(summary) || !string.IsNullOrEmpty(fullComment))
+        var modifiers = new List<string>();
+        if (symbol.IsStatic) modifiers.Add("static");
+        if (symbol.IsVirtual) modifiers.Add("virtual");
+        if (symbol.IsOverride) modifiers.Add("override");
+        if (symbol.IsAbstract) modifiers.Add("abstract");
+        if (modifiers.Count > 0)
+        {
+            sb.AppendLine($"- **Modifiers**: {string.Join(", ", modifiers)}");
+        }
+
+        sb.AppendLine();
+
+        // ========== Documentation Section ==========
+        var summary = symbol.GetSummaryComment();
+        var fullComment = symbol.GetFullComment();
+
+        if (!string.IsNullOrEmpty(summary) || !string.IsNullOrEmpty(fullComment))
+        {
+            sb.AppendLine("## Documentation");
+            sb.AppendLine();
+
+            if (!string.IsNullOrEmpty(fullComment))
             {
-                sb.AppendLine("## Documentation");
-                sb.AppendLine();
-
-                if (!string.IsNullOrEmpty(fullComment))
-                {
-                    sb.AppendLine(fullComment);
-                }
-                else if (!string.IsNullOrEmpty(summary))
-                {
-                    sb.AppendLine(summary);
-                }
-
-                sb.AppendLine();
+                sb.AppendLine(fullComment);
             }
+            else if (!string.IsNullOrEmpty(summary))
+            {
+                sb.AppendLine(summary);
+            }
+
+            sb.AppendLine();
         }
 
         // ========== Source Code Section ==========
-        if (parameters.Sections.HasFlag(SymbolCompleteSections.SourceCode))
+        var isMethod = symbol.Kind == SymbolKind.Method;
+        var maxLines = parameters.GetBodyMaxLines();
+
+        if (isMethod)
         {
-            var isMethod = symbol.Kind == SymbolKind.Method;
-            var maxLines = parameters.GetBodyMaxLines();
-
-            if (isMethod || parameters.DetailLevel >= Models.DetailLevel.Full)
+            var implementation = await symbol.GetFullImplementationAsync(maxLines, cancellationToken);
+            if (!string.IsNullOrEmpty(implementation))
             {
-                var implementation = await symbol.GetFullImplementationAsync(maxLines, cancellationToken);
-                if (!string.IsNullOrEmpty(implementation))
+                sb.AppendLine("## Source Code");
+                sb.AppendLine();
+
+                var totalLines = endLine - startLine + 1;
+                if (maxLines < totalLines)
                 {
-                    sb.AppendLine("## Source Code");
-                    sb.AppendLine();
-
-                    var totalLines = endLine - startLine + 1;
-                    if (maxLines < totalLines)
-                    {
-                        sb.AppendLine($"(showing {maxLines} of {totalLines} total lines)");
-                        sb.AppendLine();
-                    }
-
-                    sb.AppendLine("```csharp");
-                    sb.AppendLine(implementation);
-                    sb.AppendLine("```");
+                    sb.AppendLine($"(showing {maxLines} of {totalLines} total lines)");
                     sb.AppendLine();
                 }
+
+                sb.AppendLine("```csharp");
+                sb.AppendLine(implementation);
+                sb.AppendLine("```");
+                sb.AppendLine();
             }
         }
 
         // ========== References Section ==========
-        if (parameters.Sections.HasFlag(SymbolCompleteSections.References) && parameters.IncludeReferences)
+        if (parameters.IncludeReferences)
         {
             try
             {
@@ -230,7 +221,7 @@ public class GetSymbolCompleteTool
         }
 
         // ========== Inheritance Section ==========
-        if (parameters.Sections.HasFlag(SymbolCompleteSections.Inheritance) && parameters.IncludeInheritance)
+        if (parameters.IncludeInheritance)
         {
             if (symbol is INamedTypeSymbol type)
             {
@@ -278,7 +269,7 @@ public class GetSymbolCompleteTool
         }
 
         // ========== Call Graph Section ==========
-        if (parameters.Sections.HasFlag(SymbolCompleteSections.CallGraph) && parameters.IncludeCallGraph)
+        if (parameters.IncludeCallGraph)
         {
             if (symbol is IMethodSymbol method)
             {

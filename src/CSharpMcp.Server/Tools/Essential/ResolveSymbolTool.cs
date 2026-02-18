@@ -111,15 +111,12 @@ public class ResolveSymbolTool
         }
 
         // Documentation
-        if (parameters.DetailLevel >= Models.DetailLevel.Standard)
+        var summary = symbol.GetSummaryComment();
+        if (!string.IsNullOrEmpty(summary))
         {
-            var summary = symbol.GetSummaryComment();
-            if (!string.IsNullOrEmpty(summary))
-            {
-                sb.AppendLine("**Documentation**:");
-                sb.AppendLine(summary);
-                sb.AppendLine();
-            }
+            sb.AppendLine("**Documentation**:");
+            sb.AppendLine(summary);
+            sb.AppendLine();
         }
 
         // Full implementation

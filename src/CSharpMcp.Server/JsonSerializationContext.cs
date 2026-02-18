@@ -36,7 +36,6 @@ namespace CSharpMcp.Server;
 [JsonSerializable(typeof(LoadWorkspaceResponse))]
 
 // Enums (from Tools namespace)
-[JsonSerializable(typeof(DetailLevel))]
 [JsonSerializable(typeof(DiagnosticSeverity))]
 [JsonSerializable(typeof(WorkspaceKind))]
 

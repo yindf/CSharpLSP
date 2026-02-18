@@ -189,14 +189,11 @@ public class GoToDefinitionTool
         }
 
         // Show documentation
-        if (parameters.DetailLevel >= Models.DetailLevel.Standard)
+        var summary = symbol.GetSummaryComment();
+        if (!string.IsNullOrEmpty(summary))
         {
-            var summary = symbol.GetSummaryComment();
-            if (!string.IsNullOrEmpty(summary))
-            {
-                sb.AppendLine("**Documentation**:");
-                sb.AppendLine(summary);
-            }
+            sb.AppendLine("**Documentation**:");
+            sb.AppendLine(summary);
         }
 
         return sb.ToString();

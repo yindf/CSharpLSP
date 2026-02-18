@@ -1,4 +1,4 @@
-namespace CSharpMcp.Server.Models.Tools;
+﻿namespace CSharpMcp.Server.Models.Tools;
 
 /// <summary>
 /// Extension methods for parameter default value handling
@@ -29,12 +29,6 @@ public static class ParameterExtensions
     public static int GetBodyMaxLines(this BatchGetSymbolsParams parameters) =>
         parameters.BodyMaxLines > 0 ? parameters.BodyMaxLines : 50;
 
-    /// <summary>
-    /// Gets the max depth value, ensuring a sensible default
-    /// </summary>
-    public static int GetMaxDepth(this GetCallGraphParams parameters) =>
-        parameters.MaxDepth > 0 ? parameters.MaxDepth : 2;
-
     public static int GetMaxDerivedDepth(this GetInheritanceHierarchyParams parameters) =>
         parameters.MaxDerivedDepth > 0 ? parameters.MaxDerivedDepth : 3;
 
@@ -49,16 +43,4 @@ public static class ParameterExtensions
     /// </summary>
     public static int GetContextLines(this FindReferencesParams parameters) =>
         parameters.ContextLines > 0 ? parameters.ContextLines : 3;
-
-    /// <summary>
-    /// Gets the max concurrency value, ensuring a sensible default
-    /// </summary>
-    public static int GetMaxConcurrency(this BatchGetSymbolsParams parameters) =>
-        parameters.MaxConcurrency > 0 ? parameters.MaxConcurrency : 5;
-
-    /// <summary>
-    /// Gets the call graph max depth value, ensuring a sensible default
-    /// </summary>
-    public static int GetCallGraphMaxDepth(this GetSymbolCompleteParams parameters) =>
-        parameters.CallGraphMaxDepth > 0 ? parameters.CallGraphMaxDepth : 1;
 }

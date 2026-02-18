@@ -87,20 +87,13 @@ public class GetSymbolsTool
 
             sb.Append($"- **{displayName}** ({kind}) L{startLine}-{endLine}");
 
-            // 根据 DetailLevel 决定输出
-            if (parameters.DetailLevel >= Models.DetailLevel.Summary)
-            {
-                var signature = symbol.GetSignature();
-                if (!string.IsNullOrEmpty(signature))
-                    sb.Append($" - `{signature}`");
-            }
+            var signature = symbol.GetSignature();
+            if (!string.IsNullOrEmpty(signature))
+                sb.Append($" - `{signature}`");
 
-            if (parameters.DetailLevel >= Models.DetailLevel.Standard)
-            {
-                var summary = symbol.GetSummaryComment();
-                if (!string.IsNullOrEmpty(summary))
-                    sb.Append($" // {summary}");
-            }
+            var summary = symbol.GetSummaryComment();
+            if (!string.IsNullOrEmpty(summary))
+                sb.Append($" // {summary}");
 
             sb.AppendLine();
         }

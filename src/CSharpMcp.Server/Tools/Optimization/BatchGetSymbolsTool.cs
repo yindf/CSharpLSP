@@ -41,7 +41,7 @@ public class BatchGetSymbolsTool
             logger.LogDebug("Batch getting {Count} symbols", parameters.Symbols.Count);
 
             // Use a semaphore to limit concurrency
-            var semaphore = new System.Threading.SemaphoreSlim(parameters.GetMaxConcurrency());
+            var semaphore = new SemaphoreSlim(5);
             var tasks = new List<Task<SymbolBatchResult>>();
 
             foreach (var symbolParams in parameters.Symbols)
@@ -64,7 +64,6 @@ public class BatchGetSymbolsTool
                         // Build symbol info directly
                         var info = await BuildSymbolInfoAsync(
                             symbol,
-                            parameters.DetailLevel,
                             parameters.IncludeBody ? parameters.GetBodyMaxLines() : null,
                             cancellationToken);
 
@@ -155,7 +154,6 @@ public class BatchGetSymbolsTool
 
     private static async Task<string> BuildSymbolInfoAsync(
         ISymbol symbol,
-        DetailLevel detailLevel,
         int? bodyMaxLines,
         CancellationToken cancellationToken)
     {
@@ -179,13 +177,10 @@ public class BatchGetSymbolsTool
             sb.AppendLine($"**Signature**: `{signature}`");
         }
 
-        if (detailLevel >= DetailLevel.Standard)
+        var summary = symbol.GetSummaryComment();
+        if (!string.IsNullOrEmpty(summary))
         {
-            var summary = symbol.GetSummaryComment();
-            if (!string.IsNullOrEmpty(summary))
-            {
-                sb.AppendLine($"**Documentation**: {summary}");
-            }
+            sb.AppendLine($"**Documentation**: {summary}");
         }
 
         if (bodyMaxLines.HasValue && bodyMaxLines.Value > 0)

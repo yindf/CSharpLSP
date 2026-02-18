@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using CSharpMcp.Server.Models;
 
 namespace CSharpMcp.Server.Models.Tools;
 
@@ -32,11 +30,6 @@ public record FileLocationParams
 public record GetSymbolsParams : FileLocationParams
 {
     /// <summary>
-    /// 输出详细级别
-    /// </summary>
-    public DetailLevel DetailLevel { get; init; } = DetailLevel.Summary;
-
-    /// <summary>
     /// 是否包含方法体
     /// </summary>
     public bool IncludeBody { get; init; } = true;
@@ -53,11 +46,6 @@ public record GetSymbolsParams : FileLocationParams
 /// </summary>
 public record GoToDefinitionParams : FileLocationParams
 {
-    /// <summary>
-    /// 输出详细级别
-    /// </summary>
-    public DetailLevel DetailLevel { get; init; } = DetailLevel.Standard;
-
     /// <summary>
     /// 是否包含方法体
     /// </summary>
@@ -96,11 +84,6 @@ public record SearchSymbolsParams
     public required string Query { get; init; }
 
     /// <summary>
-    /// 输出详细级别
-    /// </summary>
-    public DetailLevel DetailLevel { get; init; } = DetailLevel.Summary;
-
-    /// <summary>
     /// 最大结果数量
     /// </summary>
     public int MaxResults { get; init; } = 100;
@@ -111,11 +94,6 @@ public record SearchSymbolsParams
 /// </summary>
 public record ResolveSymbolParams : FileLocationParams
 {
-    /// <summary>
-    /// 输出详细级别
-    /// </summary>
-    public DetailLevel DetailLevel { get; init; } = DetailLevel.Standard;
-
     /// <summary>
     /// 是否包含方法体
     /// </summary>
@@ -149,11 +127,6 @@ public record GetInheritanceHierarchyParams : FileLocationParams
 public record GetCallGraphParams : FileLocationParams
 {
     /// <summary>
-    /// 最大深度
-    /// </summary>
-    public int MaxDepth { get; init; } = 2;
-
-    /// <summary>
     /// 是否包含外部调用
     /// </summary>
     public bool IncludeExternalCalls { get; init; } = true;
@@ -176,16 +149,6 @@ public record GetTypeMembersParams : FileLocationParams
 /// </summary>
 public record GetSymbolCompleteParams : FileLocationParams
 {
-    /// <summary>
-    /// 要获取的信息部分 (按需返回信息)
-    /// </summary>
-    public SymbolCompleteSections Sections { get; init; } = SymbolCompleteSections.All;
-
-    /// <summary>
-    /// 输出详细级别
-    /// </summary>
-    public DetailLevel DetailLevel { get; init; } = DetailLevel.Standard;
-
     /// <summary>
     /// 方法体最大行数
     /// </summary>
@@ -218,53 +181,6 @@ public record GetSymbolCompleteParams : FileLocationParams
 }
 
 /// <summary>
-/// 符号完整信息部分
-/// </summary>
-[Flags]
-public enum SymbolCompleteSections
-{
-    /// <summary>
-    /// 基本信息 (名称、类型、位置)
-    /// </summary>
-    Basic = 1,
-
-    /// <summary>
-    /// 签名信息 (参数、返回值)
-    /// </summary>
-    Signature = 2,
-
-    /// <summary>
-    /// 文档注释
-    /// </summary>
-    Documentation = 4,
-
-    /// <summary>
-    /// 源代码
-    /// </summary>
-    SourceCode = 8,
-
-    /// <summary>
-    /// 引用位置
-    /// </summary>
-    References = 16,
-
-    /// <summary>
-    /// 继承层次
-    /// </summary>
-    Inheritance = 32,
-
-    /// <summary>
-    /// 调用图
-    /// </summary>
-    CallGraph = 64,
-
-    /// <summary>
-    /// 所有信息
-    /// </summary>
-    All = Basic | Signature | Documentation | SourceCode | References | Inheritance | CallGraph
-}
-
-/// <summary>
 /// batch_get_symbols 工具参数 - 批量获取符号信息
 /// </summary>
 public record BatchGetSymbolsParams
@@ -275,11 +191,6 @@ public record BatchGetSymbolsParams
     public required IReadOnlyList<FileLocationParams> Symbols { get; init; }
 
     /// <summary>
-    /// 输出详细级别
-    /// </summary>
-    public DetailLevel DetailLevel { get; init; } = DetailLevel.Summary;
-
-    /// <summary>
     /// 是否包含方法体
     /// </summary>
     public bool IncludeBody { get; init; } = true;
@@ -288,11 +199,6 @@ public record BatchGetSymbolsParams
     /// 方法体最大行数
     /// </summary>
     public int BodyMaxLines { get; init; } = 50;
-
-    /// <summary>
-    /// 最大并发数
-    /// </summary>
-    public int MaxConcurrency { get; init; } = 5;
 }
 
 /// <summary>
