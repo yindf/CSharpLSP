@@ -12,7 +12,6 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
-using CSharpMcp.Server.Models.Tools;
 
 namespace CSharpMcp.Server.Roslyn;
 
@@ -639,60 +638,6 @@ public static class SymbolExtensions
     }
 
     // ========== Symbol Resolution ==========
-
-    /// <summary>
-    /// Resolve symbol from FileLocationParams
-    /// </summary>
-    public static async Task<IEnumerable<ISymbol>> ResolveSymbolAsync(
-        this FileLocationParams location,
-        IWorkspaceManager workspaceManager,
-        SymbolFilter filter = SymbolFilter.TypeAndMember,
-        CancellationToken cancellationToken = default)
-    {
-        var symbols = await workspaceManager.SearchSymbolsAsync(location.SymbolName, filter, cancellationToken);
-
-        if (string.IsNullOrEmpty(location.FilePath))
-        {
-            return symbols;
-        }
-
-        return OrderSymbolsByProximity(symbols, location.FilePath, location.LineNumber);
-    }
-
-    /// <summary>
-    /// Find the best matching symbol from FileLocationParams
-    /// </summary>
-    public static async Task<ISymbol?> FindSymbolAsync(
-        this FileLocationParams location,
-        IWorkspaceManager workspaceManager,
-        SymbolFilter filter = SymbolFilter.TypeAndMember,
-        CancellationToken cancellationToken = default)
-    {
-        var symbols = await workspaceManager.SearchSymbolsAsync(location.SymbolName, filter, cancellationToken);
-        if (!symbols.Any())
-        {
-            symbols = await workspaceManager.SearchSymbolsWithPatternAsync(location.SymbolName, filter, cancellationToken);
-        }
-
-        if (string.IsNullOrEmpty(location.FilePath))
-        {
-            return symbols.FirstOrDefault();
-        }
-
-        return OrderSymbolsByProximity(symbols, location.FilePath, location.LineNumber).FirstOrDefault();
-    }
-
-    private static IEnumerable<ISymbol> OrderSymbolsByProximity(
-        IEnumerable<ISymbol> symbols,
-        string filePath,
-        int lineNumber)
-    {
-        var filename = Path.GetFileName(filePath)?.ToLowerInvariant();
-        return symbols.OrderBy(s => s.Locations.Sum(loc =>
-            (loc.GetLineSpan().Path.ToLowerInvariant().Contains(filename, StringComparison.InvariantCultureIgnoreCase) == true ? 0 : 10000) +
-            Math.Abs(loc.GetLineSpan().StartLinePosition.Line - lineNumber)));
-    }
-
     public static async Task<IEnumerable<ISymbol>> GetDeclaredSymbolsAsync(
         this Document document, CancellationToken cancellationToken)
     {

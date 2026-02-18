@@ -19,12 +19,12 @@ public class FindReferencesTool
 {
     [McpServerTool, Description("Find all references to a symbol across the workspace")]
     public static async Task<string> FindReferences(
-        [Description("Path to the file containing the symbol")] string filePath,
+        [Description("The name of the symbol to find references for")] string symbolName,
         IWorkspaceManager workspaceManager,
         ILogger<FindReferencesTool> logger,
         CancellationToken cancellationToken,
+        [Description("Path to the file containing the symbol")] string filePath = "",
         [Description("1-based line number near the symbol declaration")] int lineNumber = 0,
-        [Description("The name of the symbol to find references for")] string? symbolName = null,
         [Description("Whether to include source code context around each reference")] bool includeContext = true,
         [Description("Number of lines to show before and after each reference")] int contextLines = 3,
         [Description("Show only file names and reference counts, not detailed code context")] bool compact = false)

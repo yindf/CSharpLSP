@@ -21,7 +21,7 @@ public class GetDiagnosticsTool
         IWorkspaceManager workspaceManager,
         ILogger<GetDiagnosticsTool> logger,
         CancellationToken cancellationToken,
-        [Description("Path to specific file to check (null = entire workspace)")] string? filePath = null,
+        [Description("Path to specific file to check (null = entire workspace)")] string filePath = null,
         [Description("Whether to include warnings in output")] bool includeWarnings = true,
         [Description("Whether to include info messages in output")] bool includeInfo = false,
         [Description("Whether to include hidden diagnostics")] bool includeHidden = false)

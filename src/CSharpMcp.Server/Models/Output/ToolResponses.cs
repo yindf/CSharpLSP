@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using DiagnosticSeverity = CSharpMcp.Server.Models.Tools.DiagnosticSeverity;
+using CSharpMcp.Server.Models.Tools;
 using WorkspaceKind = CSharpMcp.Server.Roslyn.WorkspaceKind;
 
 namespace CSharpMcp.Server.Models.Output;

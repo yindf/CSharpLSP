@@ -2,7 +2,6 @@
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using CSharpMcp.Server.Models;
-using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Roslyn;
 
@@ -13,20 +12,6 @@ namespace CSharpMcp.Server;
 /// Includes all parameter types and response types used by MCP tools.
 /// </summary>
 
-// Parameter types
-[JsonSerializable(typeof(FileLocationParams))]
-[JsonSerializable(typeof(GetSymbolsParams))]
-[JsonSerializable(typeof(FindReferencesParams))]
-[JsonSerializable(typeof(ResolveSymbolParams))]
-[JsonSerializable(typeof(SearchSymbolsParams))]
-[JsonSerializable(typeof(GetInheritanceHierarchyParams))]
-[JsonSerializable(typeof(GetCallGraphParams))]
-[JsonSerializable(typeof(GetTypeMembersParams))]
-[JsonSerializable(typeof(GetSymbolInfoParams))]
-[JsonSerializable(typeof(BatchGetSymbolsParams))]
-[JsonSerializable(typeof(GetDiagnosticsParams))]
-[JsonSerializable(typeof(LoadWorkspaceParams))]
-
 // Response types (only remaining types after refactoring)
 [JsonSerializable(typeof(GetDiagnosticsResponse))]
 [JsonSerializable(typeof(DiagnosticItem))]
@@ -35,7 +20,6 @@ namespace CSharpMcp.Server;
 [JsonSerializable(typeof(LoadWorkspaceResponse))]
 
 // Enums (from Tools namespace)
-[JsonSerializable(typeof(DiagnosticSeverity))]
 [JsonSerializable(typeof(WorkspaceKind))]
 
 public partial class JsonSerializationContext : JsonSerializerContext

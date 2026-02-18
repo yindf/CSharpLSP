@@ -17,12 +17,12 @@ public class GetTypeMembersTool
 {
     [McpServerTool, Description("Get all members (methods, properties, fields, events) of a type")]
     public static async Task<string> GetTypeMembers(
-        [Description("Path to the file containing the type")] string filePath,
+        [Description("The name of the type to get members for")] string symbolName,
         IWorkspaceManager workspaceManager,
         ILogger<GetTypeMembersTool> logger,
         CancellationToken cancellationToken,
+        [Description("Path to the file containing the type")] string filePath = "",
         [Description("1-based line number near the type declaration")] int lineNumber = 0,
-        [Description("The name of the type to get members for")] string? symbolName = null,
         [Description("Whether to include inherited members")] bool includeInherited = false)
     {
         try

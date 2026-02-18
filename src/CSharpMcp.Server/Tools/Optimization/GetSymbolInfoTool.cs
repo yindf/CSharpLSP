@@ -19,13 +19,13 @@ public class GetSymbolInfoTool
 {
     [McpServerTool, Description("Get complete symbol information combining signature, documentation, references, inheritance, and call graph")]
     public static async Task<string> GetSymbolInfo(
-        [Description("Path to the file containing the symbol")] string filePath,
+        [Description("The name of the symbol to analyze")] string symbolName,
         IWorkspaceManager workspaceManager,
         IInheritanceAnalyzer inheritanceAnalyzer,
         ILogger<GetSymbolInfoTool> logger,
         CancellationToken cancellationToken,
+        [Description("Path to the file containing the symbol")] string filePath = "",
         [Description("1-based line number near the symbol declaration")] int lineNumber = 0,
-        [Description("The name of the symbol to analyze")] string? symbolName = null,
         [Description("Whether to include method/property implementation")] bool includeBody = true,
         [Description("Maximum lines of implementation code to include")] int maxBodyLines = 100,
         [Description("Whether to include references to the symbol")] bool includeReferences = false,

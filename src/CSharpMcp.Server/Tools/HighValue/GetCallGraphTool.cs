@@ -15,12 +15,12 @@ public class GetCallGraphTool
 {
     [McpServerTool, Description("Get call graph for a method showing its callers and callees")]
     public static async Task<string> GetCallGraph(
-        [Description("Path to the file containing the method")] string filePath,
+        [Description("The name of the method to analyze")] string symbolName,
         IWorkspaceManager workspaceManager,
         ILogger<GetCallGraphTool> logger,
         CancellationToken cancellationToken,
+        [Description("Path to the file containing the method")] string filePath = "",
         [Description("1-based line number near the method declaration")] int lineNumber = 0,
-        [Description("The name of the method to analyze")] string? symbolName = null,
         [Description("Maximum number of callers to display")] int maxCallers = 20,
         [Description("Maximum number of callees to display")] int maxCallees = 10)
     {

@@ -16,13 +16,13 @@ public class GetInheritanceHierarchyTool
 {
     [McpServerTool, Description("Get the complete inheritance hierarchy for a type including base types, interfaces, and derived types")]
     public static async Task<string> GetInheritanceHierarchy(
-        [Description("Path to the file containing the type")] string filePath,
+        [Description("The name of the type to analyze")] string symbolName,
         IWorkspaceManager workspaceManager,
         IInheritanceAnalyzer inheritanceAnalyzer,
         ILogger<GetInheritanceHierarchyTool> logger,
         CancellationToken cancellationToken,
+        [Description("Path to the file containing the type")] string filePath = "",
         [Description("1-based line number near the type declaration")] int lineNumber = 0,
-        [Description("The name of the type to analyze")] string? symbolName = null,
         [Description("Whether to include derived types in the hierarchy")] bool includeDerivedTypes = true,
         [Description("Maximum depth for derived type search (0 = unlimited, default 3)")] int maxDepth = 3)
     {

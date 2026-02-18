@@ -19,15 +19,15 @@ public class GetDefinitionTool
 {
     [McpServerTool, Description("Get comprehensive information about a symbol including signature, documentation, and location")]
     public static async Task<string> GetDefinition(
-        [Description("Path to the file containing the symbol")] string filePath,
+        [Description("The name of the symbol to locate")] string symbolName,
         IWorkspaceManager workspaceManager,
         ILogger<GetDefinitionTool> logger,
         CancellationToken cancellationToken,
+        [Description("Path to the file containing the symbol")] string filePath = "",
         [Description("1-based line number near the symbol declaration (used for fuzzy matching)")] int lineNumber = 0,
-        [Description("The name of the symbol to locate")] string? symbolName = null,
         [Description("Whether to include method/property implementation in output")] bool includeBody = true,
         [Description("Maximum number of lines to include for implementation code")] int maxBodyLines = 50,
-        [Description("Only return primary symbol definitions (classes, interfaces, methods), excluding fields/properties")] bool definitionsOnly = true)
+        [Description("Only return primary symbol definitions (classes, interfaces, methods), excluding fields/properties")] bool definitionsOnly = false)
     {
         try
         {

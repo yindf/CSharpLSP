@@ -251,12 +251,9 @@ dotnet test tests/CSharpMcp.IntegrationTests
 - [x] Phase 3: HighValue 工具（3个高级分析工具）
 - [x] Phase 4: Optimization 工具（3个优化工具）
 
-### 进行中 🚧
+## Debug
 
-- [ ] Phase 5: 集成与部署
-  - [ ] 集成测试
-  - [ ] 性能测试
-  - [ ] 文档完善
+npx @modelcontextprotocol/inspector CSharpMcp.Server.exe
 
 ## 贡献
 

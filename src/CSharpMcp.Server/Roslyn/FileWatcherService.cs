@@ -55,6 +55,10 @@ internal sealed class FileWatcherService : IDisposable
         };
 
         // 注册事件处理器
+        // 注意：不监听 Created 事件，因为：
+        // 1. Created 事件时文件可能还未完全写入，MD5 快照不准确
+        // 2. 依赖 Changed 事件检测新文件（文件写入时会触发）
+        // 3. 这样可以保持 MD5 防循环机制有效
         _watcher.Changed += OnFileChanged;
         _watcher.Deleted += OnFileChanged;
         _watcher.Renamed += OnFileRenamed;
