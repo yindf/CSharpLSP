@@ -10,7 +10,7 @@ set RUNTIME=win-x64
 echo Publishing CSharpMcp.Server for Windows x64...
 echo.
 
-dotnet publish src\CSharpMcp.Server\CSharpMcp.Server.csproj -c %CONFIGURATION% -o %OUTPUT_DIR% -r %RUNTIME% --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=true -p:PublishReadyToRun=true
+dotnet publish src\CSharpMcp.Server\CSharpMcp.Server.csproj -c %CONFIGURATION% -o %OUTPUT_DIR% -r %RUNTIME% --self-contained true
 
 if %ERRORLEVEL% EQU 0 (
     echo.
