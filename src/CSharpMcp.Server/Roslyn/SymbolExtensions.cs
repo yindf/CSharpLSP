@@ -49,19 +49,82 @@ public static class SymbolExtensions
         return "";
     }
 
+
     /// <summary>
-    /// 获取符号的行号范围
+    /// 获取符号的完整行号范围（包含文档注释和属性）
     /// </summary>
     public static (int startLine, int endLine) GetLineRange(this ISymbol symbol)
     {
-        var locations = symbol.Locations;
-        if (locations.Length > 0)
+        foreach (var syntaxReference in symbol.DeclaringSyntaxReferences)
         {
-            var lineSpan = locations[0].GetLineSpan();
+            var node = syntaxReference.GetSyntax();
+            var tree = node.SyntaxTree;
+
+            // 获取完整跨度（包含前导注释和属性）
+            var fullSpan = GetFullSpanWithLeadingTrivia(node);
+            var lineSpan = tree.GetLineSpan(fullSpan);
+
+            return (lineSpan.StartLinePosition.Line + 1, lineSpan.EndLinePosition.Line + 1);
+        }
+
+        // 回退到 Locations（用于元数据引用等情况）
+        if (symbol.Locations.Length > 0 && symbol.Locations[0].IsInSource)
+        {
+            var lineSpan = symbol.Locations[0].GetLineSpan();
             return (lineSpan.StartLinePosition.Line + 1, lineSpan.EndLinePosition.Line + 1);
         }
 
         return (0, 0);
+    }
+
+    /// <summary>
+    /// 获取包含前导 XML 注释和属性的完整跨度
+    /// </summary>
+    private static TextSpan GetFullSpanWithLeadingTrivia(SyntaxNode node)
+    {
+        // 获取节点的起始位置
+        var startPosition = node.SpanStart;
+
+        // 向前查找 XML 文档注释和属性
+        var leadingTrivia = node.GetLeadingTrivia();
+
+        // 找到最远的相关前导内容（XML 注释或属性）
+        var relevantTrivia = leadingTrivia.Where(t =>
+            t.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) ||
+            t.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia) ||
+            t.IsKind(SyntaxKind.SingleLineCommentTrivia) ||
+            IsAttributeTrivia(t)
+        ).ToList();
+
+        if (relevantTrivia.Any())
+        {
+            // 找到第一个相关 trivia 的起始位置
+            var firstTrivia = relevantTrivia.First();
+            startPosition = firstTrivia.SpanStart;
+        }
+
+        // 结束位置使用 FullSpan 的结束（包含尾随内容如分号）
+        var endPosition = node.FullSpan.End;
+
+        return TextSpan.FromBounds(startPosition, endPosition);
+    }
+
+    /// <summary>
+    /// 检查 trivia 是否包含属性（通过检查其中的结构化 trivia）
+    /// </summary>
+    private static bool IsAttributeTrivia(SyntaxTrivia trivia)
+    {
+        // 属性通常作为 StructuredTrivia 存在
+        if (trivia.HasStructure)
+        {
+            var structure = trivia.GetStructure();
+            return structure is AttributeListSyntax ||
+                   structure.DescendantNodes().Any(n => n is AttributeListSyntax);
+        }
+
+        // 检查 trivia 文本是否看起来像属性（备用方案）
+        var text = trivia.ToString().Trim();
+        return text.StartsWith("[") && text.Contains("]");
     }
 
     // ========== 签名信息（使用模式匹配）==========
