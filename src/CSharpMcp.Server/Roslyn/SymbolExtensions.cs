@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using CSharpMcp.Server.Models.Tools;
 
 namespace CSharpMcp.Server.Roslyn;
 
@@ -520,7 +521,7 @@ public static class SymbolExtensions
         {
             var displayName = caller.CallingSymbol.Name;
 
-            sb.AppendLine($"- **{displayName}** ({caller.CallingSymbol.Locations})");
+            sb.AppendLine($"- **{caller.CallingSymbol.GetSignature()}** ({caller.CallingSymbol.GetLineRange()})");
             foreach (var location in caller.Locations)
             {
                 sb.AppendLine($"{location.SourceSpan} L:{location.GetLineSpan()}");
@@ -706,4 +707,76 @@ public static class SymbolExtensions
                && assignment.Left == memberAccess;
     }
 
+    // ========== Symbol Resolution ==========
+
+    /// <summary>
+    /// Resolve symbol from FileLocationParams
+    /// </summary>
+    public static async Task<(ISymbol? symbol, Document document)> ResolveSymbolFromLocationAsync(
+        this FileLocationParams location,
+        IWorkspaceManager workspaceManager,
+        SymbolFilter filter = SymbolFilter.TypeAndMember,
+        CancellationToken cancellationToken = default)
+    {
+        var document = await workspaceManager.GetDocumentAsync(location.FilePath, cancellationToken);
+        if (document == null)
+        {
+            return (null, null!);
+        }
+
+        ISymbol? symbol = null;
+
+
+
+        return (symbol, document);
+    }
+
+    public static bool WildcardMatch(string input, string pattern)
+    {
+        input = input.ToLowerInvariant();
+        pattern = pattern.ToLowerInvariant();
+
+        int inputIndex = 0, patternIndex = 0;
+        int inputBackup = -1, patternBackup = -1;
+
+        while (inputIndex < input.Length)
+        {
+            if (patternIndex < pattern.Length &&
+                (pattern[patternIndex] == '?' || pattern[patternIndex] == input[inputIndex]))
+            {
+                inputIndex++;
+                patternIndex++;
+            }
+            else if (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+            {
+                patternBackup = ++patternIndex;
+                inputBackup = inputIndex;
+            }
+            else if (patternBackup >= 0)
+            {
+                patternIndex = patternBackup;
+                inputIndex = ++inputBackup;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        while (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+            patternIndex++;
+
+        return patternIndex == pattern.Length;
+    }
+
+    public static async Task<IEnumerable<ISymbol>> GetDeclaredSymbolsAsync(
+        this Document document, CancellationToken cancellationToken)
+    {
+        var semanticModel = await document.GetSemanticModelAsync(cancellationToken);
+        var root = await document.GetSyntaxRootAsync(cancellationToken);
+
+        return root.DescendantNodes()
+            .Select(n => semanticModel.GetDeclaredSymbol(n))
+            .Where(s => s != null);
+    }
 }

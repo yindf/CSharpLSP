@@ -25,7 +25,6 @@ public class GetTypeMembersTool
     public static async Task<string> GetTypeMembers(
         GetTypeMembersParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<GetTypeMembersTool> logger,
         CancellationToken cancellationToken)
     {
@@ -40,7 +39,10 @@ public class GetTypeMembersTool
                 parameters.FilePath, parameters.LineNumber, parameters.SymbolName);
 
             // Resolve the type symbol
-            var (symbol, document) = await ResolveSymbolAsync(parameters, workspaceManager, symbolAnalyzer, cancellationToken);
+            var (symbol, document) = await parameters.ResolveSymbolFromLocationAsync(
+                workspaceManager, symbolAnalyzer,
+                preferredKind: SymbolExtensions.SymbolKindPreference.NamedType,
+                cancellationToken);
             if (symbol == null)
             {
                 logger.LogWarning("Type not found: {SymbolName}", parameters.SymbolName ?? "at specified location");
@@ -153,53 +155,6 @@ public class GetTypeMembersTool
         }
 
         return sb.ToString();
-    }
-
-    private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(
-        GetTypeMembersParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return (null, null!);
-        }
-
-        ISymbol? symbol = null;
-
-        // Try by position
-        if (parameters.LineNumber.HasValue)
-        {
-            symbol = await symbolAnalyzer.ResolveSymbolAtPositionAsync(
-                document,
-                parameters.LineNumber.Value,
-                1,
-                cancellationToken);
-
-            // If we found a symbol but it's not a type, try to get the containing type
-            if (symbol is not INamedTypeSymbol && symbol != null)
-            {
-                symbol = symbol.ContainingType;
-            }
-        }
-
-        // Try by name
-        if (symbol == null && !string.IsNullOrEmpty(parameters.SymbolName))
-        {
-            var symbols = await symbolAnalyzer.FindSymbolsByNameAsync(
-                document,
-                parameters.SymbolName,
-                parameters.LineNumber,
-                cancellationToken);
-
-            // Prefer named type symbols
-            symbol = symbols.OfType<INamedTypeSymbol>().FirstOrDefault()
-                     ?? symbols.FirstOrDefault();
-        }
-
-        return (symbol, document);
     }
 
     /// <summary>

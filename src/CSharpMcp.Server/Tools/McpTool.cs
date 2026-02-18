@@ -13,17 +13,14 @@ namespace CSharpMcp.Server.Tools;
 public abstract class McpTool
 {
     protected readonly IWorkspaceManager WorkspaceManager;
-    protected readonly ISymbolAnalyzer SymbolAnalyzer;
     protected readonly ILogger Logger;
 
 
     protected McpTool(
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger logger)
     {
         WorkspaceManager = workspaceManager;
-        SymbolAnalyzer = symbolAnalyzer;
         Logger = logger;
     }
 

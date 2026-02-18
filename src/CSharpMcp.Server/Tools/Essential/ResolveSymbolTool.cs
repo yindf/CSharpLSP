@@ -26,7 +26,6 @@ public class ResolveSymbolTool
     public static async Task<string> ResolveSymbol(
         ResolveSymbolParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<ResolveSymbolTool> logger,
         CancellationToken cancellationToken)
     {
@@ -41,7 +40,7 @@ public class ResolveSymbolTool
                 parameters.FilePath, parameters.LineNumber, parameters.SymbolName);
 
             // Resolve the symbol
-            var (symbol, document) = await ResolveSymbolAsync(parameters, workspaceManager, symbolAnalyzer, cancellationToken);
+            var (symbol, document) = await parameters.ResolveSymbolFromLocationAsync(workspaceManager, cancellationToken: cancellationToken);
             if (symbol == null)
             {
                 var errorDetails = await BuildErrorDetails(parameters, workspaceManager, cancellationToken);
@@ -67,7 +66,6 @@ public class ResolveSymbolTool
         ISymbol symbol,
         ResolveSymbolParams parameters,
         Document document,
-        ISymbolAnalyzer symbolAnalyzer,
         CancellationToken cancellationToken)
     {
         var sb = new StringBuilder();
@@ -206,45 +204,6 @@ public class ResolveSymbolTool
         {
             return null;
         }
-    }
-
-    private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(
-        ResolveSymbolParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return (null, null!);
-        }
-
-        ISymbol? symbol = null;
-
-        // Try by position
-        if (parameters.LineNumber.HasValue)
-        {
-            symbol = await symbolAnalyzer.ResolveSymbolAtPositionAsync(
-                document,
-                parameters.LineNumber.Value,
-                1,
-                cancellationToken);
-        }
-
-        // Try by name
-        if (symbol == null && !string.IsNullOrEmpty(parameters.SymbolName))
-        {
-            var symbols = await symbolAnalyzer.FindSymbolsByNameAsync(
-                document,
-                parameters.SymbolName,
-                parameters.LineNumber,
-                cancellationToken);
-
-            symbol = symbols.FirstOrDefault();
-        }
-
-        return (symbol, document);
     }
 
     private static async Task<string> BuildErrorDetails(

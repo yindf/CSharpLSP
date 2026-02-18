@@ -27,7 +27,6 @@ public class GetDiagnosticsTool
     public static async Task<string> GetDiagnostics(
         GetDiagnosticsParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<GetDiagnosticsTool> logger,
         CancellationToken cancellationToken)
     {

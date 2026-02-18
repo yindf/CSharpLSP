@@ -25,7 +25,6 @@ public class SearchSymbolsTool
     public static async Task<string> SearchSymbols(
         SearchSymbolsParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<SearchSymbolsTool> logger,
         CancellationToken cancellationToken)
     {

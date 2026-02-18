@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
+using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace CSharpMcp.Server.Tools.Optimization;
 
@@ -27,7 +29,6 @@ public class GetSymbolCompleteTool
     public static async Task<string> GetSymbolComplete(
         GetSymbolCompleteParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         IInheritanceAnalyzer inheritanceAnalyzer,
         ILogger<GetSymbolCompleteTool> logger,
         CancellationToken cancellationToken)
@@ -43,7 +44,7 @@ public class GetSymbolCompleteTool
                 parameters.FilePath, parameters.LineNumber, parameters.SymbolName);
 
             // Resolve the symbol
-            var (symbol, document) = await ResolveSymbolAsync(parameters, workspaceManager, symbolAnalyzer, cancellationToken);
+            var (symbol, document) = await parameters.ResolveSymbolFromLocationAsync(workspaceManager, cancellationToken: cancellationToken);
             if (symbol == null)
             {
                 logger.LogWarning("Symbol not found: {SymbolName}", parameters.SymbolName ?? "at specified location");
@@ -55,7 +56,6 @@ public class GetSymbolCompleteTool
                 symbol,
                 document,
                 parameters,
-                symbolAnalyzer,
                 inheritanceAnalyzer,
                 logger,
                 cancellationToken);
@@ -75,7 +75,6 @@ public class GetSymbolCompleteTool
         ISymbol symbol,
         Document document,
         GetSymbolCompleteParams parameters,
-        ISymbolAnalyzer symbolAnalyzer,
         IInheritanceAnalyzer inheritanceAnalyzer,
         ILogger<GetSymbolCompleteTool> logger,
         CancellationToken cancellationToken)
@@ -181,10 +180,10 @@ public class GetSymbolCompleteTool
             try
             {
                 var solution = document.Project.Solution;
-                var referencedSymbols = await symbolAnalyzer.FindReferencesAsync(
+                var referencedSymbols = (await SymbolFinder.FindReferencesAsync(
                     symbol,
                     solution,
-                    cancellationToken);
+                    cancellationToken)).ToImmutableList();
 
                 if (referencedSymbols.Count > 0)
                 {
@@ -286,44 +285,5 @@ public class GetSymbolCompleteTool
         }
 
         return sb.ToString();
-    }
-
-    private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(
-        GetSymbolCompleteParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return (null, null!);
-        }
-
-        ISymbol? symbol = null;
-
-        // Try by position
-        if (parameters.LineNumber.HasValue)
-        {
-            symbol = await symbolAnalyzer.ResolveSymbolAtPositionAsync(
-                document,
-                parameters.LineNumber.Value,
-                1,
-                cancellationToken);
-        }
-
-        // Try by name
-        if (symbol == null && !string.IsNullOrEmpty(parameters.SymbolName))
-        {
-            var symbols = await symbolAnalyzer.FindSymbolsByNameAsync(
-                document,
-                parameters.SymbolName,
-                parameters.LineNumber,
-                cancellationToken);
-
-            symbol = symbols.FirstOrDefault();
-        }
-
-        return (symbol, document);
     }
 }

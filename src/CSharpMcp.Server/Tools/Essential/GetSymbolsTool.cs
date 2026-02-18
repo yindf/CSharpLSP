@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -32,7 +33,6 @@ public class GetSymbolsTool
     public static async Task<string> GetSymbols(
         GetSymbolsParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<GetSymbolsTool> logger,
         CancellationToken cancellationToken)
     {
@@ -52,7 +52,7 @@ public class GetSymbolsTool
                 throw new FileNotFoundException($"Document not found: {parameters.FilePath}");
             }
 
-            var symbols = await symbolAnalyzer.GetDocumentSymbolsAsync(document, cancellationToken);
+            var symbols = (await document.GetDeclaredSymbolsAsync(cancellationToken)).ToImmutableList();
 
             logger.LogDebug("Found {Count} symbols in {FilePath}", symbols.Count, parameters.FilePath);
 

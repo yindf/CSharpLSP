@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -28,7 +29,6 @@ public class FindReferencesTool
     public static async Task<string> FindReferences(
         FindReferencesParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<FindReferencesTool> logger,
         CancellationToken cancellationToken)
     {
@@ -43,7 +43,7 @@ public class FindReferencesTool
                 parameters.FilePath, parameters.LineNumber, parameters.SymbolName);
 
             // First, resolve the symbol
-            var (symbol, document) = await ResolveSymbolAsync(parameters, workspaceManager, symbolAnalyzer, cancellationToken);
+            var (symbol, document) = await parameters.ResolveSymbolFromLocationAsync(workspaceManager, cancellationToken: cancellationToken);
             if (symbol == null)
             {
                 var errorDetails = BuildErrorDetails(parameters, workspaceManager, cancellationToken);
@@ -55,10 +55,10 @@ public class FindReferencesTool
             var solution = document.Project.Solution;
 
             // Find references
-            var referencedSymbols = await symbolAnalyzer.FindReferencesAsync(
+            var referencedSymbols = (await SymbolFinder.FindReferencesAsync(
                 symbol,
                 solution,
-                cancellationToken);
+                cancellationToken)).ToImmutableList();
 
             logger.LogDebug("Found {Count} references for {SymbolName}", referencedSymbols.Count, symbol.Name);
 
@@ -156,45 +156,6 @@ public class FindReferencesTool
         {
             return null;
         }
-    }
-
-    private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(
-        FindReferencesParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return (null, null!);
-        }
-
-        ISymbol? symbol = null;
-
-        // Try by position
-        if (parameters.LineNumber.HasValue)
-        {
-            symbol = await symbolAnalyzer.ResolveSymbolAtPositionAsync(
-                document,
-                parameters.LineNumber.Value,
-                1,
-                cancellationToken);
-        }
-
-        // Try by name
-        if (symbol == null && !string.IsNullOrEmpty(parameters.SymbolName))
-        {
-            var symbols = await symbolAnalyzer.FindSymbolsByNameAsync(
-                document,
-                parameters.SymbolName,
-                parameters.LineNumber,
-                cancellationToken);
-
-            symbol = symbols.FirstOrDefault();
-        }
-
-        return (symbol, document);
     }
 
     private static string BuildErrorDetails(

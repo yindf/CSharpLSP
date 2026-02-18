@@ -25,7 +25,6 @@ public class GetCallGraphTool
     public static async Task<string> GetCallGraph(
         GetCallGraphParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<GetCallGraphTool> logger,
         CancellationToken cancellationToken)
     {
@@ -40,7 +39,10 @@ public class GetCallGraphTool
                 parameters.FilePath, parameters.LineNumber, parameters.SymbolName);
 
             // Resolve the method symbol
-            var (symbol, document) = await ResolveSymbolAsync(parameters, workspaceManager, symbolAnalyzer, cancellationToken);
+            var (symbol, document) = await parameters.ResolveSymbolFromLocationAsync(
+                workspaceManager,
+                preferredKind: SymbolExtensions.SymbolKindPreference.Method,
+                cancellationToken);
             if (symbol == null)
             {
                 logger.LogWarning("Method not found: {SymbolName}", parameters.SymbolName ?? "at specified location");
@@ -63,55 +65,6 @@ public class GetCallGraphTool
             logger.LogError(ex, "Error executing GetCallGraphTool");
             throw;
         }
-    }
-
-    private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(
-        GetCallGraphParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return (null, null!);
-        }
-
-        ISymbol? symbol = null;
-
-        // Try by position
-        if (parameters.LineNumber.HasValue)
-        {
-            symbol = await symbolAnalyzer.ResolveSymbolAtPositionAsync(
-                document,
-                parameters.LineNumber.Value,
-                1,
-                cancellationToken);
-
-            // If we found a symbol but it's not a method, try to get the containing method
-            if (symbol is not IMethodSymbol && symbol != null)
-            {
-                symbol = symbol.ContainingType?.GetMembers()
-                    .OfType<IMethodSymbol>()
-                    .FirstOrDefault(m => m.Name == symbol.Name);
-            }
-        }
-
-        // Try by name
-        if (symbol == null && !string.IsNullOrEmpty(parameters.SymbolName))
-        {
-            var symbols = await symbolAnalyzer.FindSymbolsByNameAsync(
-                document,
-                parameters.SymbolName,
-                parameters.LineNumber,
-                cancellationToken);
-
-            // Prefer method symbols
-            symbol = symbols.OfType<IMethodSymbol>().FirstOrDefault()
-                     ?? symbols.FirstOrDefault();
-        }
-
-        return (symbol, document);
     }
 
     /// <summary>

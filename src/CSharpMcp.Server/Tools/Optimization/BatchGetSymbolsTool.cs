@@ -27,7 +27,6 @@ public class BatchGetSymbolsTool
     public static async Task<string> BatchGetSymbols(
         BatchGetSymbolsParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<BatchGetSymbolsTool> logger,
         CancellationToken cancellationToken)
     {
@@ -51,7 +50,7 @@ public class BatchGetSymbolsTool
                     await semaphore.WaitAsync(cancellationToken);
                     try
                     {
-                        var (symbol, _) = await ResolveSymbolAsync(symbolParams, workspaceManager, symbolAnalyzer, cancellationToken);
+                        var (symbol, _) = await symbolParams.ResolveSymbolFromLocationAsync(workspaceManager, cancellationToken: cancellationToken);
                         if (symbol == null)
                         {
                             return new SymbolBatchResult(
@@ -201,45 +200,6 @@ public class BatchGetSymbolsTool
 
     private static string GetSymbolName(FileLocationParams p) =>
         p.SymbolName ?? $"{System.IO.Path.GetFileName(p.FilePath)}:{p.LineNumber}";
-
-    private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(
-        FileLocationParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return (null, null!);
-        }
-
-        ISymbol? symbol = null;
-
-        // Try by position
-        if (parameters.LineNumber.HasValue)
-        {
-            symbol = await symbolAnalyzer.ResolveSymbolAtPositionAsync(
-                document,
-                parameters.LineNumber.Value,
-                1,
-                cancellationToken);
-        }
-
-        // Try by name
-        if (symbol == null && !string.IsNullOrEmpty(parameters.SymbolName))
-        {
-            var symbols = await symbolAnalyzer.FindSymbolsByNameAsync(
-                document,
-                parameters.SymbolName,
-                parameters.LineNumber,
-                cancellationToken);
-
-            symbol = symbols.FirstOrDefault();
-        }
-
-        return (symbol, document);
-    }
 
     /// <summary>
     /// Result of a single symbol query in batch operation

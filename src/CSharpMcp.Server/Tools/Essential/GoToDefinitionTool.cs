@@ -26,7 +26,6 @@ public class GoToDefinitionTool
     public static async Task<string> GoToDefinition(
         GoToDefinitionParams parameters,
         IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<GoToDefinitionTool> logger,
         CancellationToken cancellationToken)
     {
@@ -40,25 +39,7 @@ public class GoToDefinitionTool
             logger.LogDebug("Going to definition: {FilePath}:{LineNumber} - {SymbolName}",
                 parameters.FilePath, parameters.LineNumber, parameters.SymbolName);
 
-            // Try by position first
-            if (parameters.LineNumber.HasValue)
-            {
-                var result = await TryFindByPositionAsync(parameters, workspaceManager, symbolAnalyzer, logger, cancellationToken);
-                if (result != null)
-                {
-                    return result;
-                }
-            }
-
-            // Try by name
-            if (!string.IsNullOrEmpty(parameters.SymbolName))
-            {
-                var result = await TryFindByNameAsync(parameters, workspaceManager, symbolAnalyzer, logger, cancellationToken);
-                if (result != null)
-                {
-                    return result;
-                }
-            }
+            parameters.ResolveSymbolFromLocationAsync(workspaceManager, SymbolExtensions.SymbolKindPreference.None)
 
             // 构建详细的错误信息
             var errorDetails = BuildErrorDetails(parameters, workspaceManager, logger, cancellationToken);
@@ -71,61 +52,6 @@ public class GoToDefinitionTool
             logger.LogError(ex, "Error executing GoToDefinitionTool");
             throw;
         }
-    }
-
-    private static async Task<string?> TryFindByPositionAsync(
-        GoToDefinitionParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        ILogger<GoToDefinitionTool> logger,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return null;
-        }
-
-        var lineNumber = parameters.LineNumber!.Value;
-        var symbol = await symbolAnalyzer.ResolveSymbolAtPositionAsync(
-            document,
-            lineNumber,
-            1,
-            cancellationToken);
-
-        if (symbol != null)
-        {
-            return await CreateResponseAsync(symbol, parameters, logger, cancellationToken);
-        }
-
-        return null;
-    }
-
-    private static async Task<string?> TryFindByNameAsync(
-        GoToDefinitionParams parameters,
-        IWorkspaceManager workspaceManager,
-        ISymbolAnalyzer symbolAnalyzer,
-        ILogger<GoToDefinitionTool> logger,
-        CancellationToken cancellationToken)
-    {
-        var document = await workspaceManager.GetDocumentAsync(parameters.FilePath, cancellationToken);
-        if (document == null)
-        {
-            return null;
-        }
-
-        var symbols = await symbolAnalyzer.FindSymbolsByNameAsync(
-            document,
-            parameters.SymbolName!,
-            parameters.LineNumber,
-            cancellationToken);
-
-        if (symbols.Count > 0)
-        {
-            return await CreateResponseAsync(symbols[0], parameters, logger, cancellationToken);
-        }
-
-        return null;
     }
 
     private static async Task<string> CreateResponseAsync(

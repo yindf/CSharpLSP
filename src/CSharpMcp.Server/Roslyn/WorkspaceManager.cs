@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.Extensions.Logging;
 
@@ -23,12 +24,10 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
     private DateTime _lastUpdate;
     private FileWatcherService? _fileWatcher;
     private int _isCompiling;
-    private SymbolCache _symbolCache;
 
     public WorkspaceManager(ILogger<WorkspaceManager> logger)
     {
         _logger = logger;
-        _symbolCache =  new SymbolCache();
         _workspace = MSBuildWorkspace.Create();
 
         _workspace.WorkspaceFailed += (s, e) =>
@@ -362,48 +361,20 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
 
     public async Task<IEnumerable<ISymbol>> SearchSymbolsAsync(string query)
     {
+        return await SymbolFinder.FindSourceDeclarationsWithPatternAsync(_workspace.CurrentSolution, query, SymbolFilter.TypeAndMember);
+
+        SymbolFinder.FindSourceDeclarationsAsync(
+            document,
+            SymbolFilter.TypeAndMember);
+
         IEnumerable<ISymbol> symbols = Enumerable.Empty<ISymbol>();
-        static bool WildcardMatch(string input, string pattern)
-        {
-            int inputIndex = 0, patternIndex = 0;
-            int inputBackup = -1, patternBackup = -1;
-
-            while (inputIndex < input.Length)
-            {
-                if (patternIndex < pattern.Length &&
-                    (pattern[patternIndex] == '?' || pattern[patternIndex] == input[inputIndex]))
-                {
-                    inputIndex++;
-                    patternIndex++;
-                }
-                else if (patternIndex < pattern.Length && pattern[patternIndex] == '*')
-                {
-                    patternBackup = ++patternIndex;
-                    inputBackup = inputIndex;
-                }
-                else if (patternBackup >= 0)
-                {
-                    patternIndex = patternBackup;
-                    inputIndex = ++inputBackup;
-                }
-                else
-                {
-                    return false;
-                }
-            }
-
-            while (patternIndex < pattern.Length && pattern[patternIndex] == '*')
-                patternIndex++;
-
-            return patternIndex == pattern.Length;
-        }
 
         foreach (var project in _workspace.CurrentSolution.Projects)
         {
             var compilation = await project.GetCompilationAsync();
             if (compilation == null)
                 continue;
-            symbols = symbols.Concat(compilation.GetSymbolsWithName(symbol => WildcardMatch(symbol, query), SymbolFilter.All));
+            symbols = symbols.Concat(compilation.GetSymbolsWithName(symbol => SymbolExtensions.WildcardMatch(symbol, query)));
         }
 
         return symbols;

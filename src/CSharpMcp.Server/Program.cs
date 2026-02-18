@@ -30,7 +30,6 @@ public class Program
 
         // Core services (injected into tool methods by MCP SDK)
         builder.Services.AddSingleton<IWorkspaceManager, WorkspaceManager>();
-        builder.Services.AddSingleton<ISymbolAnalyzer, SymbolAnalyzer>();
         builder.Services.AddSingleton<IInheritanceAnalyzer, InheritanceAnalyzer>();
 
         // Set up MCP Server with stdio transport
