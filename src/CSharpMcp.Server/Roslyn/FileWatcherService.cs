@@ -190,8 +190,7 @@ internal sealed class FileWatcherService : IDisposable
             _deferredChanges.Clear();
 
             // 对即将处理的文件做 MD5 快照
-            filesToSnapshot = changesToProcess.Keys.ToList();
-            foreach (var filePath in filesToSnapshot)
+            foreach (var filePath in changesToProcess.Keys)
             {
                 try
                 {
@@ -233,6 +232,10 @@ internal sealed class FileWatcherService : IDisposable
                     lock (_stateLock)
                     {
                         _isInCallback = false;
+                        foreach (var deferredChange in _applyingSnapshots.Keys)
+                        {
+                            _deferredChanges.RemoveAll(tuple => tuple.filePath ==  deferredChange);
+                        }
                         _applyingSnapshots.Clear();
 
                         // 处理期间积累的真实变化
@@ -246,6 +249,7 @@ internal sealed class FileWatcherService : IDisposable
                             }
                             _deferredChanges.Clear();
                         }
+
                     }
                 }
             });
