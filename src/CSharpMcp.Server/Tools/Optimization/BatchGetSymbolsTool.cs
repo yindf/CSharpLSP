@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
 
@@ -26,16 +25,18 @@ public class BatchGetSymbolsTool
     /// </summary>
     [McpServerTool, Description("Query multiple symbols in parallel for improved performance")]
     public static async Task<string> BatchGetSymbols(
-        BatchGetSymbolsParams parameters,
+        [Description("List of symbol locations to query in batch")] IReadOnlyList<FileLocationParams> symbols,
         IWorkspaceManager workspaceManager,
         ILogger<BatchGetSymbolsTool> logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [Description("Whether to include implementation code")] bool includeBody = true,
+        [Description("Maximum lines per symbol implementation")] int maxBodyLines = 50)
     {
         try
         {
-            if (parameters == null)
+            if (symbols == null)
             {
-                throw new ArgumentNullException(nameof(parameters));
+                throw new ArgumentNullException(nameof(symbols));
             }
 
             // Check workspace state
@@ -45,20 +46,27 @@ public class BatchGetSymbolsTool
                 return workspaceError;
             }
 
-            logger.LogInformation("Batch getting {Count} symbols", parameters.Symbols.Count);
+            logger.LogInformation("Batch getting {Count} symbols", symbols.Count);
 
             // Use a semaphore to limit concurrency
             var semaphore = new SemaphoreSlim(5);
             var tasks = new List<Task<SymbolBatchResult>>();
 
-            foreach (var symbolParams in parameters.Symbols)
+            foreach (var symbolParams in symbols)
             {
                 var task = Task.Run(async () =>
                 {
                     await semaphore.WaitAsync(cancellationToken);
                     try
                     {
-                        var symbol = await symbolParams.FindSymbolAsync(workspaceManager, cancellationToken: cancellationToken);
+                        var symbol = await SymbolResolver.ResolveSymbolAsync(
+                            symbolParams.FilePath,
+                            symbolParams.LineNumber,
+                            symbolParams.SymbolName ?? "",
+                            workspaceManager,
+                            SymbolFilter.TypeAndMember,
+                            cancellationToken);
+
                         if (symbol == null)
                         {
                             return new SymbolBatchResult(
@@ -89,7 +97,7 @@ public class BatchGetSymbolsTool
                         var info = await BuildSymbolInfoAsync(
                             symbol,
                             fuzzyMatchWarning,
-                            parameters.IncludeBody ? parameters.GetBodyMaxLines() : null,
+                            includeBody ? maxBodyLines : null,
                             cancellationToken);
 
                         return new SymbolBatchResult(

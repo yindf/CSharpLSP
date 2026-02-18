@@ -2,29 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
-using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using CSharpMcp.Server.Roslyn;
 
 namespace CSharpMcp.Server.Tools.Essential;
 
-/// <summary>
-/// find_references 工具 - 查找符号的所有引用
-/// </summary>
 [McpServerToolType]
 public class FindReferencesTool
 {
-    /// <summary>
-    /// Find all references to a symbol across the workspace
-    /// </summary>
     [McpServerTool, Description("Find all references to a symbol across the workspace")]
     public static async Task<string> FindReferences(
         [Description("Path to the file containing the symbol")] string filePath,
@@ -39,12 +31,6 @@ public class FindReferencesTool
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(filePath))
-            {
-                throw new ArgumentException("File path is required", nameof(filePath));
-            }
-
-            // Check workspace state
             var workspaceError = WorkspaceErrorHelper.CheckWorkspaceLoaded(workspaceManager, "Find References");
             if (workspaceError != null)
             {
@@ -54,19 +40,16 @@ public class FindReferencesTool
             logger.LogInformation("Finding references: {FilePath}:{LineNumber} - {SymbolName}",
                 filePath, lineNumber, symbolName);
 
-            // First, resolve the symbol
-            var symbol = await ResolveSymbolAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, cancellationToken);
+            var symbol = await SymbolResolver.ResolveSymbolAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, SymbolFilter.TypeAndMember, cancellationToken);
             if (symbol == null)
             {
-                var errorDetails = await BuildErrorDetailsAsync(filePath, lineNumber, symbolName ?? "Not specified", workspaceManager, cancellationToken);
+                var errorDetails = await MarkdownHelper.BuildSymbolNotFoundErrorDetailsAsync(
+                    filePath, lineNumber, symbolName ?? "Not specified", workspaceManager.GetCurrentSolution(), cancellationToken);
                 logger.LogWarning("Symbol not found: {Details}", errorDetails);
-                return GetErrorHelpResponse(errorDetails);
+                return GetErrorHelpResponse(errorDetails.ToString());
             }
 
-            // Get the solution
             var solution = workspaceManager.GetCurrentSolution();
-
-            // Find references
             var referencedSymbols = (await SymbolFinder.FindReferencesAsync(
                 symbol,
                 solution,
@@ -74,13 +57,12 @@ public class FindReferencesTool
 
             logger.LogInformation("Found {Count} references for {SymbolName}", referencedSymbols.Count, symbol.Name);
 
-            // Build Markdown directly
             return await BuildReferencesMarkdownAsync(symbol, referencedSymbols, compact, cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing FindReferencesTool");
-            return GetErrorHelpResponse($"Failed to find references: {ex.Message}\n\nStack Trace:\n```\n{ex.StackTrace}\n```\n\nCommon issues:\n- Symbol not found in workspace\n- Workspace is not loaded (call LoadWorkspace first)\n- Symbol is from an external library");
+            return GetErrorHelpResponse($"Failed to find references: {ex.Message}");
         }
     }
 
@@ -106,7 +88,6 @@ public class FindReferencesTool
         sb.AppendLine($"## References: `{displayName}`");
         sb.AppendLine();
 
-        // Group by file
         var groupedByFile = referencedSymbols
             .SelectMany(rs => rs.Locations.Select(loc => new
             {
@@ -115,7 +96,6 @@ public class FindReferencesTool
             }))
             .GroupBy(r => r.ReferenceLocation.Document.FilePath);
 
-        // Calculate total references correctly
         long totalRefs = groupedByFile.Sum(g => g.Count());
 
         if (compact)
@@ -125,7 +105,7 @@ public class FindReferencesTool
 
             foreach (var fileGroup in groupedByFile.OrderBy(g => g.Key))
             {
-                var fileName = Path.GetFileName(fileGroup.Key);
+                var fileName = System.IO.Path.GetFileName(fileGroup.Key);
                 var count = fileGroup.Count();
                 sb.AppendLine($"- `{fileName}`: {count} reference{(count != 1 ? "s" : "")}");
             }
@@ -137,7 +117,7 @@ public class FindReferencesTool
 
         foreach (var fileGroup in groupedByFile.OrderBy(g => g.Key))
         {
-            var fileName = Path.GetFileName(fileGroup.Key);
+            var fileName = System.IO.Path.GetFileName(fileGroup.Key);
             sb.AppendLine($"### {fileName}");
             sb.AppendLine();
 
@@ -148,7 +128,6 @@ public class FindReferencesTool
                 var startLine = lineSpan.StartLinePosition.Line + 1;
                 var endLine = lineSpan.EndLinePosition.Line + 1;
 
-                // Extract line text
                 var lineText = await MarkdownHelper.ExtractLineTextAsync(refLoc.ReferenceLocation.Document, startLine, cancellationToken);
 
                 var lineRange = endLine > startLine ? $"L{startLine}-{endLine}" : $"L{startLine}";
@@ -157,7 +136,6 @@ public class FindReferencesTool
             sb.AppendLine();
         }
 
-        // Summary
         sb.AppendLine("**Summary**:");
         var filesAffected = groupedByFile.Count();
 
@@ -170,57 +148,5 @@ public class FindReferencesTool
     private static int GetLineNumber(ReferenceLocation location)
     {
         return location.Location.GetLineSpan().StartLinePosition.Line + 1;
-    }
-
-    private static async Task<string> BuildErrorDetailsAsync(
-        string filePath,
-        int lineNumber,
-        string symbolName,
-        IWorkspaceManager workspaceManager,
-        CancellationToken cancellationToken)
-    {
-        var details = await MarkdownHelper.BuildSymbolNotFoundErrorDetailsAsync(
-            filePath,
-            lineNumber,
-            symbolName,
-            workspaceManager.GetCurrentSolution(),
-            cancellationToken);
-
-        return details.ToString();
-    }
-
-    /// <summary>
-    /// Resolve a single symbol from file location info
-    /// </summary>
-    private static async Task<ISymbol?> ResolveSymbolAsync(
-        string filePath,
-        int lineNumber,
-        string symbolName,
-        IWorkspaceManager workspaceManager,
-        CancellationToken cancellationToken)
-    {
-        var symbols = await workspaceManager.SearchSymbolsAsync(symbolName, SymbolFilter.TypeAndMember, cancellationToken);
-        if (!symbols.Any())
-        {
-            symbols = await workspaceManager.SearchSymbolsWithPatternAsync(symbolName, SymbolFilter.TypeAndMember, cancellationToken);
-        }
-
-        if (string.IsNullOrEmpty(filePath))
-        {
-            return symbols.FirstOrDefault();
-        }
-
-        return OrderSymbolsByProximity(symbols, filePath, lineNumber).FirstOrDefault();
-    }
-
-    private static IEnumerable<ISymbol> OrderSymbolsByProximity(
-        IEnumerable<ISymbol> symbols,
-        string filePath,
-        int lineNumber)
-    {
-        var filename = Path.GetFileName(filePath)?.ToLowerInvariant();
-        return symbols.OrderBy(s => s.Locations.Sum(loc =>
-            (loc.GetLineSpan().Path.ToLowerInvariant().Contains(filename, StringComparison.InvariantCultureIgnoreCase) == true ? 0 : 10000) +
-            Math.Abs(loc.GetLineSpan().StartLinePosition.Line - lineNumber)));
     }
 }

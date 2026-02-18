@@ -2,29 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using CSharpMcp.Server.Roslyn;
-using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace CSharpMcp.Server.Tools.Optimization;
 
-/// <summary>
-/// get_symbol_info 工具 - 整合多个信息源获取完整符号信息
-/// 减少API调用次数，一次性返回所有需要的信息
-/// </summary>
 [McpServerToolType]
 public class GetSymbolInfoTool
 {
-    /// <summary>
-    /// Get complete symbol information from multiple sources in one call
-    /// </summary>
     [McpServerTool, Description("Get complete symbol information combining signature, documentation, references, inheritance, and call graph")]
     public static async Task<string> GetSymbolInfo(
         [Description("Path to the file containing the symbol")] string filePath,
@@ -43,12 +35,6 @@ public class GetSymbolInfoTool
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(filePath))
-            {
-                throw new ArgumentException("File path is required", nameof(filePath));
-            }
-
-            // Check workspace state
             var workspaceError = WorkspaceErrorHelper.CheckWorkspaceLoaded(workspaceManager, "Get Symbol Info");
             if (workspaceError != null)
             {
@@ -58,15 +44,13 @@ public class GetSymbolInfoTool
             logger.LogInformation("Getting complete symbol info: {FilePath}:{LineNumber} - {SymbolName}",
                 filePath, lineNumber, symbolName);
 
-            // Resolve the symbol
-            var symbol = await ResolveSymbolAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, cancellationToken);
+            var symbol = await SymbolResolver.ResolveSymbolAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, SymbolFilter.TypeAndMember, cancellationToken);
             if (symbol == null)
             {
                 logger.LogWarning("Symbol not found: {SymbolName}", symbolName ?? "at specified location");
-                return GetErrorHelpResponse($"Symbol not found: `{symbolName ?? "at specified location"}`\n\nCommon issues:\n- Symbol name is incorrect\n- File path or line number is wrong\n- Symbol is from an external library");
+                return GetErrorHelpResponse($"Symbol not found: `{symbolName ?? "at specified location"}`");
             }
 
-            // Build complete Markdown
             var result = await BuildCompleteMarkdownAsync(
                 symbol,
                 includeBody,
@@ -87,7 +71,7 @@ public class GetSymbolInfoTool
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing GetSymbolInfoTool");
-            return GetErrorHelpResponse($"Failed to get complete symbol information: {ex.Message}\n\nStack Trace:\n```\n{ex.StackTrace}\n```\n\nCommon issues:\n- Symbol not found in workspace\n- Workspace is not loaded (call LoadWorkspace first)\n- Symbol is from an external library");
+            return GetErrorHelpResponse($"Failed to get complete symbol information: {ex.Message}");
         }
     }
 
@@ -123,7 +107,6 @@ public class GetSymbolInfoTool
         sb.AppendLine($"# Complete Symbol Information: `{displayName}`");
         sb.AppendLine();
 
-        // ========== Basic Info Section ==========
         sb.AppendLine("## Basic Information");
         sb.AppendLine();
         sb.AppendLine($"- **Name**: `{displayName}`");
@@ -162,7 +145,6 @@ public class GetSymbolInfoTool
 
         sb.AppendLine();
 
-        // ========== Documentation Section ==========
         var summary = symbol.GetSummaryComment();
         var fullComment = symbol.GetFullComment();
 
@@ -183,7 +165,6 @@ public class GetSymbolInfoTool
             sb.AppendLine();
         }
 
-        // ========== Source Code Section ==========
         var isMethod = symbol.Kind == SymbolKind.Method;
 
         if (isMethod)
@@ -208,7 +189,6 @@ public class GetSymbolInfoTool
             }
         }
 
-        // ========== References Section ==========
         if (includeReferences)
         {
             try
@@ -239,7 +219,6 @@ public class GetSymbolInfoTool
                             var refLineSpan = loc.Location.GetLineSpan();
                             var refLine = refLineSpan.StartLinePosition.Line + 1;
 
-                            // Extract line text for context
                             var lineText = await MarkdownHelper.ExtractLineTextAsync(loc.Document, refLine, cancellationToken);
 
                             sb.AppendLine($"- `{refFileName}:{refLine}`");
@@ -266,7 +245,6 @@ public class GetSymbolInfoTool
             }
         }
 
-        // ========== Inheritance Section ==========
         if (includeInheritance)
         {
             if (symbol is INamedTypeSymbol type)
@@ -313,7 +291,6 @@ public class GetSymbolInfoTool
             }
         }
 
-        // ========== Call Graph Section ==========
         if (includeCallGraph)
         {
             if (symbol is IMethodSymbol method)
@@ -330,40 +307,5 @@ public class GetSymbolInfoTool
         }
 
         return sb.ToString();
-    }
-
-    /// <summary>
-    /// Resolve a single symbol from file location info
-    /// </summary>
-    private static async Task<ISymbol?> ResolveSymbolAsync(
-        string filePath,
-        int lineNumber,
-        string symbolName,
-        IWorkspaceManager workspaceManager,
-        CancellationToken cancellationToken)
-    {
-        var symbols = await workspaceManager.SearchSymbolsAsync(symbolName, SymbolFilter.TypeAndMember, cancellationToken);
-        if (!symbols.Any())
-        {
-            symbols = await workspaceManager.SearchSymbolsWithPatternAsync(symbolName, SymbolFilter.TypeAndMember, cancellationToken);
-        }
-
-        if (string.IsNullOrEmpty(filePath))
-        {
-            return symbols.FirstOrDefault();
-        }
-
-        return OrderSymbolsByProximity(symbols, filePath, lineNumber).FirstOrDefault();
-    }
-
-    private static IEnumerable<ISymbol> OrderSymbolsByProximity(
-        IEnumerable<ISymbol> symbols,
-        string filePath,
-        int lineNumber)
-    {
-        var filename = System.IO.Path.GetFileName(filePath)?.ToLowerInvariant();
-        return symbols.OrderBy(s => s.Locations.Sum(loc =>
-            (loc.GetLineSpan().Path.ToLowerInvariant().Contains(filename, StringComparison.InvariantCultureIgnoreCase) == true ? 0 : 10000) +
-            Math.Abs(loc.GetLineSpan().StartLinePosition.Line - lineNumber)));
     }
 }

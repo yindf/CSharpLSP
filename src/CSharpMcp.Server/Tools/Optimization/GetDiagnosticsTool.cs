@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,16 +13,9 @@ using CSharpMcp.Server.Roslyn;
 
 namespace CSharpMcp.Server.Tools.Optimization;
 
-/// <summary>
-/// get_diagnostics 工具 - 获取编译诊断信息
-/// 返回项目中的错误、警告和信息
-/// </summary>
 [McpServerToolType]
 public class GetDiagnosticsTool
 {
-    /// <summary>
-    /// Get compiler errors and warnings for a file or workspace
-    /// </summary>
     [McpServerTool, Description("Get compiler diagnostics (errors, warnings, info) for files or the entire workspace")]
     public static async Task<string> GetDiagnostics(
         IWorkspaceManager workspaceManager,
@@ -36,7 +28,6 @@ public class GetDiagnosticsTool
     {
         try
         {
-            // Check workspace state
             var workspaceError = WorkspaceErrorHelper.CheckWorkspaceLoaded(workspaceManager, "Get Diagnostics");
             if (workspaceError != null)
             {
@@ -48,7 +39,6 @@ public class GetDiagnosticsTool
             var diagnostics = new List<DiagnosticItem>();
             var filesWithDiagnostics = new HashSet<string>();
 
-            // Trigger workspace auto-load by getting a compilation (this will load the workspace if needed)
             var compilation = await workspaceManager.GetCompilationAsync(cancellationToken: cancellationToken);
             var solution = workspaceManager.GetCurrentSolution();
             if (solution == null)
@@ -56,10 +46,8 @@ public class GetDiagnosticsTool
                 return GetErrorHelpResponse("Workspace not loaded. Please call LoadWorkspace first to load a C# solution or project.");
             }
 
-            // Determine which projects/documents to analyze
             if (!string.IsNullOrEmpty(filePath))
             {
-                // Single file
                 var document = await workspaceManager.GetDocumentAsync(filePath, cancellationToken);
                 if (document == null)
                 {
@@ -71,7 +59,6 @@ public class GetDiagnosticsTool
             }
             else
             {
-                // All documents in workspace
                 foreach (var project in solution.Projects)
                 {
                     foreach (var document in project.Documents)
@@ -82,7 +69,6 @@ public class GetDiagnosticsTool
                 }
             }
 
-            // Calculate summary
             int totalErrors = diagnostics.Count(d => d.Severity == Models.Tools.DiagnosticSeverity.Error);
             int totalWarnings = diagnostics.Count(d => d.Severity == Models.Tools.DiagnosticSeverity.Warning);
             int totalInfo = diagnostics.Count(d => d.Severity == Models.Tools.DiagnosticSeverity.Info);
@@ -104,7 +90,7 @@ public class GetDiagnosticsTool
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing GetDiagnosticsTool");
-            return GetErrorHelpResponse($"Failed to get diagnostics: {ex.Message}\n\nStack Trace:\n```\n{ex.StackTrace}\n```\n\nCommon issues:\n- Workspace is not loaded (call LoadWorkspace first)\n- File path is incorrect\n- Workspace has compilation errors");
+            return GetErrorHelpResponse($"Failed to get diagnostics: {ex.Message}");
         }
     }
 
@@ -135,13 +121,11 @@ public class GetDiagnosticsTool
             return diagnostics;
         }
 
-        // Get diagnostics from the compilation
         var compilation = semanticModel.Compilation;
         var compilationDiagnostics = compilation.GetDiagnostics(cancellationToken);
 
         diagnostics.AddRange(ProcessDiagnostics(compilationDiagnostics, document, includeWarnings, includeInfo, includeHidden, filesWithDiagnostics));
 
-        // Get syntactic diagnostics
         var syntaxRoot = await document.GetSyntaxRootAsync(cancellationToken);
         if (syntaxRoot != null)
         {
@@ -197,19 +181,16 @@ public class GetDiagnosticsTool
 
     private static bool ShouldIncludeDiagnostic(Microsoft.CodeAnalysis.Diagnostic diagnostic, bool includeWarnings, bool includeInfo, bool includeHidden)
     {
-        // Check warning inclusion
         if (diagnostic.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Warning && !includeWarnings)
         {
             return false;
         }
 
-        // Check info inclusion
         if (diagnostic.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Info && !includeInfo)
         {
             return false;
         }
 
-        // Check hidden inclusion
         if (!diagnostic.IsSuppressed && !includeHidden && diagnostic.DefaultSeverity == Microsoft.CodeAnalysis.DiagnosticSeverity.Hidden)
         {
             return false;

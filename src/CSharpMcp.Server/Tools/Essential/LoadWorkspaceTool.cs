@@ -11,15 +11,9 @@ using CSharpMcp.Server.Roslyn;
 
 namespace CSharpMcp.Server.Tools.Essential;
 
-/// <summary>
-/// load_workspace 工具 - 加载 C# 解决方案或项目
-/// </summary>
 [McpServerToolType]
 public class LoadWorkspaceTool
 {
-    /// <summary>
-    /// Load a C# solution or project for analysis
-    /// </summary>
     [McpServerTool, Description("Load a C# solution (.sln), project (.csproj), or directory for analysis")]
     public static async Task<string> LoadWorkspace(
         [Description("Path to .sln file, .csproj file, or directory containing them")] string path,
@@ -68,28 +62,17 @@ public class LoadWorkspaceTool
         catch (Exception ex)
         {
             logger.LogError(ex, "Error loading workspace");
-            return GetErrorHelpResponse($"Failed to load workspace: {ex.Message}\n\nCommon issues:\n- Project has build errors\n- Missing required SDKs or NuGet packages\n- Invalid project file format");
+            return GetErrorHelpResponse($"Failed to load workspace: {ex.Message}");
         }
     }
 
     private static string GetErrorHelpResponse(string message)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("## Load Workspace - Failed");
-        sb.AppendLine();
-        sb.AppendLine(message);
-        sb.AppendLine();
-        sb.AppendLine("**Usage:**");
-        sb.AppendLine();
-        sb.AppendLine("```");
-        sb.AppendLine("LoadWorkspace(path: string)");
-        sb.AppendLine("```");
-        sb.AppendLine();
-        sb.AppendLine("**Examples:**");
-        sb.AppendLine("- `LoadWorkspace(path: \"C:/MyProject/MySolution.sln\")`");
-        sb.AppendLine("- `LoadWorkspace(path: \"./MyProject.csproj\")`");
-        sb.AppendLine("- `LoadWorkspace(path: \".\")` - Auto-detect in current directory");
-        sb.AppendLine();
-        return sb.ToString();
+        return MarkdownHelper.BuildErrorResponse(
+            "Load Workspace",
+            message,
+            "LoadWorkspace(path: string)",
+            "- `LoadWorkspace(path: \"C:/MyProject/MySolution.sln\")`\n- `LoadWorkspace(path: \"./MyProject.csproj\")`\n- `LoadWorkspace(path: \".\")` - Auto-detect in current directory"
+        );
     }
 }

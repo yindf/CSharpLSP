@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -14,15 +13,9 @@ using CSharpMcp.Server.Roslyn;
 
 namespace CSharpMcp.Server.Tools.Essential;
 
-/// <summary>
-/// get_symbols 工具 - 获取文档中的所有符号
-/// </summary>
 [McpServerToolType]
 public class GetSymbolsTool
 {
-    /// <summary>
-    /// Get all symbols in a C# document with optional filtering
-    /// </summary>
     [McpServerTool, Description("Get all symbols (classes, methods, properties, etc.) declared in a C# file")]
     public static async Task<string> GetSymbols(
         [Description("Path to the C# file (absolute, relative, or filename only for fuzzy matching)")] string filePath,
@@ -37,13 +30,6 @@ public class GetSymbolsTool
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(filePath))
-            {
-                logger.LogError("Error executing GetSymbolsTool, filePath is null or empty");
-                return GetErrorHelpResponse($"Failed to get symbols: filePath is required");
-            }
-
-            // Check workspace state
             var workspaceError = WorkspaceErrorHelper.CheckWorkspaceLoaded(workspaceManager, "Get Symbols");
             if (workspaceError != null)
             {
@@ -61,42 +47,27 @@ public class GetSymbolsTool
             }
 
             var symbols = (await document.GetDeclaredSymbolsAsync(cancellationToken)).ToImmutableList();
-
-            // Apply filters
             symbols = ApplyFilters(symbols, minVisibility, symbolKinds, excludeLocal);
 
             logger.LogDebug("Found {Count} symbols in {FilePath}", symbols.Count, filePath);
 
-            // Build Markdown directly
             return await BuildSymbolsMarkdownAsync(filePath, symbols, includeBody, maxBodyLines, cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing GetSymbolsTool");
-            return GetErrorHelpResponse($"Failed to get symbols: {ex.Message}\n\nStack Trace:\n```\n{ex.StackTrace}\n```\n\nCommon issues:\n- File path is incorrect\n- Workspace is not loaded (call LoadWorkspace first)\n- File has compilation errors");
+            return GetErrorHelpResponse($"Failed to get symbols: {ex.Message}");
         }
     }
 
     private static string GetErrorHelpResponse(string message)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("## Get Symbols - Failed");
-        sb.AppendLine();
-        sb.AppendLine(message);
-        sb.AppendLine();
-        sb.AppendLine("**Usage:**");
-        sb.AppendLine();
-        sb.AppendLine("```");
-        sb.AppendLine("GetSymbols(");
-        sb.AppendLine("    filePath: \"path/to/File.cs\"");
-        sb.AppendLine(")");
-        sb.AppendLine("```");
-        sb.AppendLine();
-        sb.AppendLine("**Examples:**");
-        sb.AppendLine("- `GetSymbols(filePath: \"C:/MyProject/MyClass.cs\")`");
-        sb.AppendLine("- `GetSymbols(filePath: \"./Utils.cs\", minVisibility: \"Public\")`");
-        sb.AppendLine();
-        return sb.ToString();
+        return MarkdownHelper.BuildErrorResponse(
+            "Get Symbols",
+            message,
+            "GetSymbols(\n    filePath: \"path/to/File.cs\"\n)",
+            "- `GetSymbols(filePath: \"C:/MyProject/MyClass.cs\")`\n- `GetSymbols(filePath: \"./Utils.cs\", minVisibility: \"Public\")`"
+        );
     }
 
     private static async Task<string> BuildSymbolsMarkdownAsync(
@@ -135,9 +106,6 @@ public class GetSymbolsTool
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Apply visibility, kind, and local filters to the symbol list
-    /// </summary>
     private static ImmutableList<ISymbol> ApplyFilters(
         ImmutableList<ISymbol> symbols,
         string minVisibility,
@@ -146,14 +114,12 @@ public class GetSymbolsTool
     {
         var filtered = symbols.Where(s => !s.IsImplicitlyDeclared);
 
-        // Parse minVisibility string to Accessibility enum
         if (Enum.TryParse<Accessibility>(minVisibility, ignoreCase: true, out var minAccess) &&
             minAccess != Accessibility.Private)
         {
             filtered = FilterByAccessibility(filtered, minAccess);
         }
 
-        // Apply symbol kind filter
         if (symbolKinds is { Length: > 0 })
         {
             var kinds = new HashSet<SymbolKind>(
@@ -161,7 +127,6 @@ public class GetSymbolsTool
             filtered = filtered.Where(s => kinds.Contains(s.Kind));
         }
 
-        // Exclude local variables and parameters
         if (excludeLocal)
         {
             filtered = filtered.Where(s => s.Kind != SymbolKind.Local && s.Kind != SymbolKind.Parameter);
@@ -170,9 +135,6 @@ public class GetSymbolsTool
         return filtered.ToImmutableList();
     }
 
-    /// <summary>
-    /// Filter symbols by minimum accessibility level
-    /// </summary>
     private static IEnumerable<ISymbol> FilterByAccessibility(IEnumerable<ISymbol> symbols, Accessibility minLevel)
     {
         var accessibilityOrder = new[] { Accessibility.Private, Accessibility.Protected, Accessibility.Internal, Accessibility.Public };
@@ -186,9 +148,6 @@ public class GetSymbolsTool
         });
     }
 
-    /// <summary>
-    /// Parse string to SymbolKind
-    /// </summary>
     private static SymbolKind ParseSymbolKind(string kind)
     {
         return Enum.TryParse<SymbolKind>(kind, ignoreCase: true, out var result)

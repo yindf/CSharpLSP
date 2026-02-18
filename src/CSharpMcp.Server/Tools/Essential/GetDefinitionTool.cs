@@ -2,28 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using CSharpMcp.Server.Roslyn;
-using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace CSharpMcp.Server.Tools.Essential;
 
-/// <summary>
-/// get_definition 工具 - 获取符号的完整信息
-/// </summary>
 [McpServerToolType]
 public class GetDefinitionTool
 {
-    /// <summary>
-    /// Get comprehensive symbol information including documentation, comments, and context
-    /// </summary>
     [McpServerTool, Description("Get comprehensive information about a symbol including signature, documentation, and location")]
     public static async Task<string> GetDefinition(
         [Description("Path to the file containing the symbol")] string filePath,
@@ -38,12 +31,6 @@ public class GetDefinitionTool
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(filePath))
-            {
-                throw new ArgumentException("File path is required", nameof(filePath));
-            }
-
-            // Check workspace state
             var workspaceError = WorkspaceErrorHelper.CheckWorkspaceLoaded(workspaceManager, "Get Definition");
             if (workspaceError != null)
             {
@@ -53,29 +40,26 @@ public class GetDefinitionTool
             logger.LogInformation("Resolving symbol: {FilePath}:{LineNumber} - {SymbolName}",
                 filePath, lineNumber, symbolName);
 
-            // Resolve the symbol
-            var symbols = await ResolveSymbolAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, cancellationToken);
+            var symbols = await SymbolResolver.ResolveSymbolsAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, cancellationToken);
 
-            // Apply DefinitionsOnly filter if enabled
             if (definitionsOnly)
             {
                 symbols = symbols.Where(s => s is INamedTypeSymbol or IMethodSymbol).ToImmutableList();
             }
 
-            if (symbols == null || !symbols.Any())
+            if (!symbols.Any())
             {
-                var errorDetails = await BuildErrorDetailsAsync(filePath, lineNumber, symbolName ?? "Not specified", workspaceManager, cancellationToken);
+                var errorDetails = await MarkdownHelper.BuildSymbolNotFoundErrorDetailsAsync(
+                    filePath, lineNumber, symbolName ?? "Not specified", workspaceManager.GetCurrentSolution(), cancellationToken);
                 logger.LogWarning("Symbol not found: {Details}", errorDetails);
-                return GetErrorHelpResponse(errorDetails);
+                return GetErrorHelpResponse(errorDetails.ToString());
             }
 
-            // Build Markdown directly
-            StringBuilder sb = new StringBuilder();
+            var sb = new StringBuilder();
             foreach (var symbol in symbols)
             {
                 var result = await BuildSymbolMarkdownAsync(symbol, includeBody, maxBodyLines, workspaceManager.GetCurrentSolution(), cancellationToken);
                 sb.AppendLine(result);
-
                 logger.LogInformation("Resolved symbol: {SymbolName}", symbol.Name);
             }
 
@@ -84,7 +68,7 @@ public class GetDefinitionTool
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing GetDefinitionTool");
-            return GetErrorHelpResponse($"Failed to resolve symbol: {ex.Message}\n\nStack Trace:\n```\n{ex.StackTrace}\n```\n\nCommon issues:\n- Symbol not found in workspace\n- Workspace is not loaded (call LoadWorkspace first)\n- Symbol is from an external library");
+            return GetErrorHelpResponse($"Failed to resolve symbol: {ex.Message}");
         }
     }
 
@@ -114,7 +98,6 @@ public class GetDefinitionTool
         sb.AppendLine($"## Symbol: `{displayName}`");
         sb.AppendLine();
 
-        // Basic info
         sb.AppendLine("**Basic Info**:");
         sb.AppendLine($"- **Kind**: {kind}");
         sb.AppendLine($"- **Accessibility**: {symbol.GetAccessibilityString()}");
@@ -134,7 +117,6 @@ public class GetDefinitionTool
         }
         sb.AppendLine();
 
-        // Signature
         var signature = symbol.GetSignature();
         if (!string.IsNullOrEmpty(signature))
         {
@@ -145,7 +127,6 @@ public class GetDefinitionTool
             sb.AppendLine();
         }
 
-        // Documentation
         var summary = symbol.GetSummaryComment();
         if (!string.IsNullOrEmpty(summary))
         {
@@ -154,7 +135,6 @@ public class GetDefinitionTool
             sb.AppendLine();
         }
 
-        // Full implementation
         if (includeBody)
         {
             var implementation = await symbol.GetFullImplementationAsync(maxBodyLines, cancellationToken);
@@ -174,7 +154,6 @@ public class GetDefinitionTool
             }
         }
 
-        // References (limited)
         try
         {
             var referencedSymbols = (await SymbolFinder.FindReferencesAsync(
@@ -197,7 +176,6 @@ public class GetDefinitionTool
                         var refLineSpan = loc.Location.GetLineSpan();
                         var refLine = refLineSpan.StartLinePosition.Line + 1;
 
-                        // Extract line text
                         var lineText = await MarkdownHelper.ExtractLineTextAsync(loc.Document, refLine, cancellationToken);
 
                         sb.AppendLine($"- `{refFileName}:{refLine}`");
@@ -213,57 +191,8 @@ public class GetDefinitionTool
         }
         catch
         {
-            // Ignore reference errors
         }
 
         return sb.ToString();
-    }
-
-    private static async Task<string> BuildErrorDetailsAsync(
-        string filePath,
-        int lineNumber,
-        string symbolName,
-        IWorkspaceManager workspaceManager,
-        CancellationToken cancellationToken)
-    {
-        var details = await MarkdownHelper.BuildSymbolNotFoundErrorDetailsAsync(
-            filePath,
-            lineNumber,
-            symbolName,
-            workspaceManager.GetCurrentSolution(),
-            cancellationToken);
-
-        return details.ToString();
-    }
-
-    /// <summary>
-    /// Resolve symbols from file location info
-    /// </summary>
-    private static async Task<IEnumerable<ISymbol>> ResolveSymbolAsync(
-        string filePath,
-        int lineNumber,
-        string symbolName,
-        IWorkspaceManager workspaceManager,
-        CancellationToken cancellationToken)
-    {
-        var symbols = await workspaceManager.SearchSymbolsAsync(symbolName, SymbolFilter.TypeAndMember, cancellationToken);
-
-        if (string.IsNullOrEmpty(filePath))
-        {
-            return symbols;
-        }
-
-        return OrderSymbolsByProximity(symbols, filePath, lineNumber);
-    }
-
-    private static IEnumerable<ISymbol> OrderSymbolsByProximity(
-        IEnumerable<ISymbol> symbols,
-        string filePath,
-        int lineNumber)
-    {
-        var filename = Path.GetFileName(filePath)?.ToLowerInvariant();
-        return symbols.OrderBy(s => s.Locations.Sum(loc =>
-            (loc.GetLineSpan().Path.ToLowerInvariant().Contains(filename, StringComparison.InvariantCultureIgnoreCase) == true ? 0 : 10000) +
-            Math.Abs(loc.GetLineSpan().StartLinePosition.Line - lineNumber)));
     }
 }

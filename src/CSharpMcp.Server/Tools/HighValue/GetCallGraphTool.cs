@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,19 +7,12 @@ using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using CSharpMcp.Server.Roslyn;
-using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace CSharpMcp.Server.Tools.HighValue;
 
-/// <summary>
-/// get_call_graph 工具 - 获取方法的调用图
-/// </summary>
 [McpServerToolType]
 public class GetCallGraphTool
 {
-    /// <summary>
-    /// Get the call graph for a method showing callers and callees
-    /// </summary>
     [McpServerTool, Description("Get call graph for a method showing its callers and callees")]
     public static async Task<string> GetCallGraph(
         [Description("Path to the file containing the method")] string filePath,
@@ -35,12 +26,6 @@ public class GetCallGraphTool
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(filePath))
-            {
-                throw new ArgumentException("File path is required", nameof(filePath));
-            }
-
-            // Check workspace state
             var workspaceError = WorkspaceErrorHelper.CheckWorkspaceLoaded(workspaceManager, "Get Call Graph");
             if (workspaceError != null)
             {
@@ -50,8 +35,7 @@ public class GetCallGraphTool
             logger.LogInformation("Getting call graph: {FilePath}:{LineNumber} - {SymbolName}",
                 filePath, lineNumber, symbolName);
 
-            // Resolve the method symbol
-            var symbol = await ResolveSymbolAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, SymbolFilter.Member, cancellationToken);
+            var symbol = await SymbolResolver.ResolveSymbolAsync(filePath, lineNumber, symbolName ?? "", workspaceManager, SymbolFilter.Member, cancellationToken);
             if (symbol == null)
             {
                 logger.LogWarning("Method not found: {SymbolName}", symbolName ?? "at specified location");
@@ -65,14 +49,12 @@ public class GetCallGraphTool
             }
 
             var solution = workspaceManager.GetCurrentSolution();
-
-            // Build Markdown directly
             return await method.GetCallGraphMarkdown(solution, maxCallers, maxCallees, cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing GetCallGraphTool");
-            return GetErrorHelpResponse($"Failed to get call graph: {ex.Message}\n\nStack Trace:\n```\n{ex.StackTrace}\n```\n\nCommon issues:\n- Symbol is not a method (use GetSymbols to find methods)\n- Symbol is from an external library\n- Workspace is not loaded (call LoadWorkspace first)");
+            return GetErrorHelpResponse($"Failed to get call graph: {ex.Message}");
         }
     }
 
@@ -86,9 +68,6 @@ public class GetCallGraphTool
         );
     }
 
-    /// <summary>
-    /// Generate helpful error response when no symbol is found
-    /// </summary>
     private static string GetNoSymbolFoundHelpResponse(string filePath, int? lineNumber, string? symbolName)
     {
         var sb = new StringBuilder();
@@ -120,9 +99,6 @@ public class GetCallGraphTool
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Generate helpful error response when symbol is not a method
-    /// </summary>
     private static string GetNotAMethodHelpResponse(string symbolName, string symbolKind, string filePath, int? lineNumber)
     {
         var sb = new StringBuilder();
@@ -139,41 +115,5 @@ public class GetCallGraphTool
         sb.AppendLine("- Properties, fields, and other members don't have call graphs");
         sb.AppendLine();
         return sb.ToString();
-    }
-
-    /// <summary>
-    /// Resolve a single symbol from file location info
-    /// </summary>
-    private static async Task<ISymbol?> ResolveSymbolAsync(
-        string filePath,
-        int lineNumber,
-        string symbolName,
-        IWorkspaceManager workspaceManager,
-        SymbolFilter filter,
-        CancellationToken cancellationToken)
-    {
-        var symbols = await workspaceManager.SearchSymbolsAsync(symbolName, filter, cancellationToken);
-        if (!symbols.Any())
-        {
-            symbols = await workspaceManager.SearchSymbolsWithPatternAsync(symbolName, filter, cancellationToken);
-        }
-
-        if (string.IsNullOrEmpty(filePath))
-        {
-            return symbols.FirstOrDefault();
-        }
-
-        return OrderSymbolsByProximity(symbols, filePath, lineNumber).FirstOrDefault();
-    }
-
-    private static IEnumerable<ISymbol> OrderSymbolsByProximity(
-        IEnumerable<ISymbol> symbols,
-        string filePath,
-        int lineNumber)
-    {
-        var filename = System.IO.Path.GetFileName(filePath)?.ToLowerInvariant();
-        return symbols.OrderBy(s => s.Locations.Sum(loc =>
-            (loc.GetLineSpan().Path.ToLowerInvariant().Contains(filename, StringComparison.InvariantCultureIgnoreCase) == true ? 0 : 10000) +
-            Math.Abs(loc.GetLineSpan().StartLinePosition.Line - lineNumber)));
     }
 }
