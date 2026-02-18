@@ -1,5 +1,7 @@
 using CSharpMcp.Server.Models;
 using CSharpMcp.Server.Models.Tools;
+using CSharpMcp.Server.Roslyn;
+using System.Text;
 
 namespace CSharpMcp.Server.Models.Output;
 
@@ -12,6 +14,47 @@ public abstract record ToolResponse
     /// 转换为 Markdown 格式
     /// </summary>
     public abstract string ToMarkdown();
+
+    /// <summary>
+    /// 获取符号的显示名称（处理 .ctor 等特殊情况）
+    /// </summary>
+    protected static string GetDisplayName(SymbolInfo symbol)
+    {
+        if (symbol.Name == ".ctor" && !string.IsNullOrEmpty(symbol.ContainingType))
+        {
+            return symbol.ContainingType.Split('.').Last();
+        }
+        return symbol.Name;
+    }
+
+    /// <summary>
+    /// 获取符号的显示名称（简单字符串版本）
+    /// </summary>
+    protected static string GetDisplayName(string name, string? containingType)
+    {
+        if (name == ".ctor" && !string.IsNullOrEmpty(containingType))
+        {
+            return containingType.Split('.').Last();
+        }
+        return name;
+    }
+
+    /// <summary>
+    /// 获取相对路径（如果可能）
+    /// </summary>
+    protected static string GetRelativePath(string filePath)
+    {
+        try
+        {
+            var currentDir = System.IO.Directory.GetCurrentDirectory();
+            var relativePath = System.IO.Path.GetRelativePath(currentDir, filePath);
+            return string.IsNullOrEmpty(relativePath) ? filePath : relativePath.Replace('\\', '/');
+        }
+        catch
+        {
+            return filePath.Replace('\\', '/');
+        }
+    }
 }
 
 /// <summary>
@@ -33,63 +76,16 @@ public record GetSymbolsResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"## Symbols: {System.IO.Path.GetFileName(FilePath)}");
         sb.AppendLine($"**Total: {TotalCount} symbol{(TotalCount != 1 ? "s" : "")}**");
         sb.AppendLine();
 
+        // 使用统一的格式化器输出符号（简化格式）
         foreach (var symbol in Symbols)
         {
-            sb.AppendLine(SymbolToMarkdown(symbol));
+            sb.AppendLine(SymbolFormatter.FormatSymbolSimplified(symbol));
             sb.AppendLine();
-        }
-
-        return sb.ToString();
-    }
-
-    private static string SymbolToMarkdown(SymbolInfo symbol, int indent = 0)
-    {
-        var prefix = new string(' ', indent * 2);
-        var sb = new System.Text.StringBuilder();
-
-        var accessibility = symbol.Accessibility switch
-        {
-            Accessibility.Public => "public",
-            Accessibility.Internal => "internal",
-            Accessibility.Protected => "protected",
-            Accessibility.Private => "private",
-            Accessibility.ProtectedInternal => "protected internal",
-            Accessibility.PrivateProtected => "private protected",
-            _ => ""
-        };
-
-        var modifiers = new List<string>();
-        if (symbol.IsStatic) modifiers.Add("static");
-        if (symbol.IsVirtual) modifiers.Add("virtual");
-        if (symbol.IsOverride) modifiers.Add("override");
-        if (symbol.IsAbstract) modifiers.Add("abstract");
-        if (symbol.IsAsync) modifiers.Add("async");
-
-        var allModifiers = new List<string>();
-        if (!string.IsNullOrEmpty(accessibility)) allModifiers.Add(accessibility);
-        allModifiers.AddRange(modifiers);
-
-        var modifierStr = allModifiers.Count > 0 ? string.Join(" ", allModifiers) + " " : "";
-
-        sb.Append($"{prefix}**{symbol.Name}** ({symbol.Kind}):{symbol.Location.StartLine}-{symbol.Location.EndLine}");
-
-        if (symbol.Signature != null)
-        {
-            var returnType = !string.IsNullOrEmpty(symbol.Signature.ReturnType) ? $": {symbol.Signature.ReturnType}" : "";
-            var paramsStr = symbol.Signature.Parameters.Count > 0
-                ? $"({string.Join(", ", symbol.Signature.Parameters)})"
-                : "()";
-            sb.Append($" - {modifierStr}{symbol.Name}{paramsStr}{returnType}");
-        }
-
-        if (!string.IsNullOrEmpty(symbol.Documentation))
-        {
-            sb.Append($" - {symbol.Documentation}");
         }
 
         return sb.ToString();
@@ -107,53 +103,23 @@ public record GoToDefinitionResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"### Definition: `{Symbol.Name}`");
+        var sb = new StringBuilder();
+        var displayName = GetDisplayName(Symbol);
+        sb.AppendLine($"### Definition: `{displayName}`");
+
+        // Calculate actual lines shown
+        var linesShown = Symbol.SourceCode?.Split('\n').Length ?? 0;
 
         if (IsTruncated)
         {
-            sb.AppendLine($"(lines {Symbol.Location.StartLine}-{Symbol.Location.EndLine}, showing {TotalLines} of {TotalLines} total lines)");
-        }
-        else
-        {
-            sb.AppendLine($"(lines {Symbol.Location.StartLine}-{Symbol.Location.EndLine})");
+            sb.AppendLine($"(showing {linesShown} of {TotalLines} total lines)");
         }
 
         sb.AppendLine();
 
-        if (Symbol.Signature != null)
-        {
-            sb.AppendLine("**Signature**:");
-            sb.AppendLine("```csharp");
-            var returnType = !string.IsNullOrEmpty(Symbol.Signature.ReturnType) ? $"{Symbol.Signature.ReturnType} " : "";
-            var paramsStr = Symbol.Signature.Parameters.Count > 0
-                ? string.Join(", ", Symbol.Signature.Parameters)
-                : "";
-            sb.AppendLine($"{returnType}{Symbol.Name}({paramsStr});");
-            sb.AppendLine("```");
-            sb.AppendLine();
-        }
-
-        if (!string.IsNullOrEmpty(Symbol.Documentation))
-        {
-            sb.AppendLine("**Documentation**:");
-            sb.AppendLine(Symbol.Documentation);
-            sb.AppendLine();
-        }
-
-        if (!string.IsNullOrEmpty(Symbol.SourceCode))
-        {
-            sb.AppendLine("**Implementation**:");
-            sb.AppendLine("```csharp");
-            sb.AppendLine(Symbol.SourceCode);
-            sb.AppendLine("```");
-
-            if (IsTruncated)
-            {
-                var remaining = TotalLines - Symbol.SourceCode.Split('\n').Length;
-                sb.AppendLine($"*... {remaining} more lines hidden*");
-            }
-        }
+        // 使用统一的详细格式化器
+        var relativePath = GetRelativePath(Symbol.Location.FilePath);
+        sb.Append(SymbolFormatter.FormatSymbolDetailed(Symbol, relativePath, true, null, TotalLines));
 
         return sb.ToString();
     }
@@ -177,36 +143,31 @@ public record FindReferencesResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"## References: `{Symbol.Name}`");
+        var sb = new StringBuilder();
+        var displayName = GetDisplayName(Symbol);
+        sb.AppendLine($"## References: `{displayName}`");
         sb.AppendLine();
         sb.AppendLine($"**Found {References.Count} reference{(References.Count != 1 ? "s" : "")}**");
         sb.AppendLine();
 
         // Group by file
-        var grouped = References.GroupBy(r => r.Location.FilePath);
+        var groupedByFile = References.GroupBy(r => r.Location.FilePath);
 
-        foreach (var group in grouped)
+        foreach (var fileGroup in groupedByFile.OrderBy(g => g.Key))
         {
-            var fileName = System.IO.Path.GetFileName(group.Key);
+            var fileName = System.IO.Path.GetFileName(fileGroup.Key);
             sb.AppendLine($"### {fileName}");
             sb.AppendLine();
 
-            foreach (var @ref in group)
+            foreach (var @ref in fileGroup.OrderBy(r => r.Location.StartLine))
             {
-                sb.AppendLine($"- Line {@ref.Location.StartLine}: {@ref.ContainingSymbol}");
-                if (!string.IsNullOrEmpty(@ref.ContextCode))
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("  ```csharp");
-                    foreach (var line in @ref.ContextCode.Split('\n'))
-                    {
-                        sb.AppendLine($"  {line}");
-                    }
-                    sb.AppendLine("  ```");
-                }
-                sb.AppendLine();
+                var lineText = @ref.LineText?.Trim() ?? "";
+                var lineRange = @ref.Location.EndLine > @ref.Location.StartLine
+                    ? $"L{@ref.Location.StartLine}-{@ref.Location.EndLine}"
+                    : $"L{@ref.Location.StartLine}";
+                sb.AppendLine($"- {lineRange}: {lineText}");
             }
+            sb.AppendLine();
         }
 
         sb.AppendLine("**Summary**:");
@@ -216,6 +177,26 @@ public record FindReferencesResponse(
         sb.AppendLine($"- Files affected: {Summary.Files.Count}");
 
         return sb.ToString();
+    }
+
+    private static string GetNamespaceFromPath(string filePath)
+    {
+        // Extract namespace/assembly from file path
+        // For src/CSharpMcp.Server/Roslyn/WorkspaceManager.cs -> CSharpMcp.Server.Roslyn
+        var parts = filePath.Replace('\\', '/').Split('/');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (parts[i] == "src")
+            {
+                // Find the next non-empty part as the project/assembly
+                var j = i + 1;
+                if (j < parts.Length && !string.IsNullOrEmpty(parts[j]))
+                {
+                    return parts[j];
+                }
+            }
+        }
+        return "Unknown";
     }
 }
 
@@ -229,31 +210,25 @@ public record SearchSymbolsResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"## Search Results: \"{Query}\"");
         sb.AppendLine();
         sb.AppendLine($"**Found {Symbols.Count} symbol{(Symbols.Count != 1 ? "s" : "")}**");
         sb.AppendLine();
 
-        // Group by namespace
-        var grouped = Symbols.GroupBy(s => s.Namespace);
+        // Group by file
+        var grouped = Symbols.GroupBy(s => s.Location.FilePath);
 
         foreach (var group in grouped.OrderBy(g => g.Key))
         {
-            if (!string.IsNullOrEmpty(group.Key))
-            {
-                sb.AppendLine($"### Namespace: {group.Key}");
-            }
-            else
-            {
-                sb.AppendLine("### (Global Namespace)");
-            }
+            var relativePath = GetRelativePath(group.Key);
+            sb.AppendLine($"### {relativePath}");
             sb.AppendLine();
 
-            foreach (var symbol in group)
+            foreach (var symbol in group.OrderBy(s => s.Location.StartLine))
             {
-                var fileName = System.IO.Path.GetFileName(symbol.Location.FilePath);
-                sb.AppendLine($"- **{symbol.Name}** ({symbol.Kind}) - {fileName}:{symbol.Location.StartLine}");
+                // 使用统一的格式化器输出简化版本
+                sb.AppendLine(SymbolFormatter.FormatSymbolSimplified(symbol));
             }
             sb.AppendLine();
         }
@@ -273,49 +248,15 @@ public record ResolveSymbolResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"## Symbol: `{Symbol.Name}`");
-        sb.AppendLine();
+        var sb = new StringBuilder();
+        var displayName = GetDisplayName(Symbol);
 
-        sb.AppendLine("**Location**:");
-        sb.AppendLine($"- File: {Symbol.Location.FilePath}");
-        sb.AppendLine($"- Lines: {Symbol.Location.StartLine}-{Symbol.Location.EndLine}");
-        sb.AppendLine();
+        // 使用统一的详细格式化器输出符号详情
+        var relativePath = GetRelativePath(Symbol.Location.FilePath);
+        var totalLines = Symbol.Location.EndLine - Symbol.Location.StartLine + 1;
+        sb.Append(SymbolFormatter.FormatSymbolDetailed(Symbol, relativePath, !string.IsNullOrEmpty(Definition), null, totalLines));
 
-        sb.AppendLine("**Type**:");
-        sb.AppendLine($"- Kind: {Symbol.Kind}");
-        sb.AppendLine($"- Containing Type: {Symbol.ContainingType}");
-        sb.AppendLine($"- Namespace: {Symbol.Namespace}");
-        sb.AppendLine();
-
-        sb.AppendLine("**Modifiers**:");
-        sb.AppendLine($"- Accessibility: {Symbol.Accessibility}");
-        if (Symbol.IsStatic) sb.AppendLine($"- Static: yes");
-        if (Symbol.IsVirtual) sb.AppendLine($"- Virtual: yes");
-        if (Symbol.IsOverride) sb.AppendLine($"- Override: yes");
-        if (Symbol.IsAbstract) sb.AppendLine($"- Abstract: yes");
-        sb.AppendLine();
-
-        if (Symbol.Signature != null)
-        {
-            sb.AppendLine("**Signature**:");
-            sb.AppendLine("```csharp");
-            var returnType = !string.IsNullOrEmpty(Symbol.Signature.ReturnType) ? $"{Symbol.Signature.ReturnType} " : "";
-            var paramsStr = Symbol.Signature.Parameters.Count > 0
-                ? string.Join(", ", Symbol.Signature.Parameters)
-                : "";
-            sb.AppendLine($"{returnType}{Symbol.Name}({paramsStr});");
-            sb.AppendLine("```");
-            sb.AppendLine();
-        }
-
-        if (!string.IsNullOrEmpty(Symbol.Documentation))
-        {
-            sb.AppendLine("**Documentation**:");
-            sb.AppendLine(Symbol.Documentation);
-            sb.AppendLine();
-        }
-
+        // 添加 Definition（如果单独提供）
         if (!string.IsNullOrEmpty(Definition))
         {
             sb.AppendLine("**Definition**:");
@@ -325,17 +266,30 @@ public record ResolveSymbolResponse(
             sb.AppendLine();
         }
 
+        // 添加 References
         if (References != null && References.Count > 0)
         {
             sb.AppendLine($"**References** ({References.Count} found):");
-            foreach (var @ref in References.Take(10))
+            // 按文件分组
+            var groupedByFile = References.GroupBy(r => r.Location.FilePath);
+            foreach (var fileGroup in groupedByFile.Take(5))
             {
-                var fileName = System.IO.Path.GetFileName(@ref.Location.FilePath);
-                sb.AppendLine($"- {fileName}:{@ref.Location.StartLine} in {@ref.ContainingSymbol}");
+                var refPath = GetRelativePath(fileGroup.Key);
+                sb.AppendLine($"  - {refPath}:");
+                foreach (var @ref in fileGroup.Take(3))
+                {
+                    var lineInfo = @ref.LineText != null ? $" - {@ref.LineText.Trim()}" : "";
+                    sb.AppendLine($"    L{@ref.Location.StartLine}-{@ref.Location.EndLine}{lineInfo}");
+                }
+                if (fileGroup.Count() > 3)
+                {
+                    sb.AppendLine($"    ... and {fileGroup.Count() - 3} more in this file");
+                }
             }
-            if (References.Count > 10)
+            if (groupedByFile.Count() > 5)
             {
-                sb.AppendLine($"- ... and {References.Count - 10} more");
+                var remainingRefs = groupedByFile.Skip(5).Sum(g => g.Count());
+                sb.AppendLine($"  - ... and {remainingRefs} more in other files");
             }
         }
 
@@ -349,8 +303,8 @@ public record ResolveSymbolResponse(
 public record InheritanceHierarchyData(
     string TypeName,
     SymbolKind Kind,
-    IReadOnlyList<string> BaseTypes,
-    IReadOnlyList<string> Interfaces,
+    IReadOnlyList<SymbolInfo> BaseTypes,
+    IReadOnlyList<SymbolInfo> Interfaces,
     IReadOnlyList<SymbolInfo> DerivedTypes,
     int Depth
 );
@@ -362,7 +316,7 @@ public record InheritanceHierarchyResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"## Inheritance Hierarchy: `{TypeName}`");
         sb.AppendLine();
 
@@ -372,7 +326,15 @@ public record InheritanceHierarchyResponse(
             sb.AppendLine("**Base Types**:");
             foreach (var baseType in Hierarchy.BaseTypes)
             {
-                sb.AppendLine($"- {baseType}");
+                if (!string.IsNullOrEmpty(baseType.Location.FilePath))
+                {
+                    var relativePath = GetRelativePath(baseType.Location.FilePath);
+                    sb.AppendLine($"- {baseType.Name} - {relativePath}:L{baseType.Location.StartLine}-{baseType.Location.EndLine}");
+                }
+                else
+                {
+                    sb.AppendLine($"- {baseType.Name} (system type)");
+                }
             }
             sb.AppendLine();
         }
@@ -383,7 +345,15 @@ public record InheritanceHierarchyResponse(
             sb.AppendLine("**Implemented Interfaces**:");
             foreach (var iface in Hierarchy.Interfaces)
             {
-                sb.AppendLine($"- {iface}");
+                if (!string.IsNullOrEmpty(iface.Location.FilePath))
+                {
+                    var relativePath = GetRelativePath(iface.Location.FilePath);
+                    sb.AppendLine($"- {iface.Name} - {relativePath}:L{iface.Location.StartLine}-{iface.Location.EndLine}");
+                }
+                else
+                {
+                    sb.AppendLine($"- {iface.Name} (system type)");
+                }
             }
             sb.AppendLine();
         }
@@ -394,8 +364,9 @@ public record InheritanceHierarchyResponse(
             sb.AppendLine($"**Derived Types** ({Hierarchy.DerivedTypes.Count}, depth: {Hierarchy.Depth}):");
             foreach (var derived in Hierarchy.DerivedTypes)
             {
-                var fileName = System.IO.Path.GetFileName(derived.Location.FilePath);
-                sb.AppendLine($"- **{derived.Name}** ({derived.Kind}) - {fileName}:{derived.Location.StartLine}");
+                var relativePath = GetRelativePath(derived.Location.FilePath);
+                var displayName = GetDisplayName(derived);
+                sb.AppendLine($"- **{displayName}** ({derived.Kind}) - {relativePath}:L{derived.Location.StartLine}-{derived.Location.EndLine}");
             }
             sb.AppendLine();
         }
@@ -432,7 +403,7 @@ public record CallGraphResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"## Call Graph: `{MethodName}`");
         sb.AppendLine();
 
@@ -443,39 +414,42 @@ public record CallGraphResponse(
         sb.AppendLine($"- Cyclomatic complexity: {Statistics.CyclomaticComplexity}");
         sb.AppendLine();
 
-        // Callers
+        // Callers - 按文件分组
         if (Callers.Count > 0)
         {
             sb.AppendLine($"**Called By** ({Callers.Count}):");
-            foreach (var caller in Callers)
-            {
-                var fileName = System.IO.Path.GetFileName(caller.Symbol.Location.FilePath);
-                sb.AppendLine($"- **{caller.Symbol.Name}** - {fileName}:{caller.Symbol.Location.StartLine}");
+            var groupedByFile = Callers.GroupBy(c => c.Symbol.Location.FilePath);
 
-                if (caller.CallLocations.Count > 0)
+            foreach (var fileGroup in groupedByFile)
+            {
+                var fileName = System.IO.Path.GetFileName(fileGroup.Key);
+                sb.AppendLine($"  - {fileName}:");
+                foreach (var caller in fileGroup)
                 {
-                    foreach (var loc in caller.CallLocations.Take(3))
-                    {
-                        var locFile = System.IO.Path.GetFileName(loc.Location.FilePath);
-                        sb.AppendLine($"  - at {loc.ContainingSymbol} ({locFile}:{loc.Location.StartLine})");
-                    }
-                    if (caller.CallLocations.Count > 3)
-                    {
-                        sb.AppendLine($"  - ... and {caller.CallLocations.Count - 3} more locations");
-                    }
+                    var displayName = GetDisplayName(caller.Symbol);
+                    var lineRange = $"L{caller.Symbol.Location.StartLine}-{caller.Symbol.Location.EndLine}";
+                    sb.AppendLine($"    - **{displayName}** ({lineRange})");
                 }
             }
             sb.AppendLine();
         }
 
-        // Callees
+        // Callees - 按文件分组
         if (Callees.Count > 0)
         {
             sb.AppendLine($"**Calls** ({Callees.Count}):");
-            foreach (var callee in Callees)
+            var groupedByFile = Callees.GroupBy(c => c.Symbol.Location.FilePath);
+
+            foreach (var fileGroup in groupedByFile)
             {
-                var fileName = System.IO.Path.GetFileName(callee.Symbol.Location.FilePath);
-                sb.AppendLine($"- **{callee.Symbol.Name}** - {fileName}:{callee.Symbol.Location.StartLine}");
+                var fileName = System.IO.Path.GetFileName(fileGroup.Key);
+                sb.AppendLine($"  - {fileName}:");
+                foreach (var callee in fileGroup)
+                {
+                    var displayName = GetDisplayName(callee.Symbol);
+                    var lineRange = $"L{callee.Symbol.Location.StartLine}-{callee.Symbol.Location.EndLine}";
+                    sb.AppendLine($"    - **{displayName}** ({lineRange})");
+                }
             }
             sb.AppendLine();
         }
@@ -495,7 +469,10 @@ public record MemberInfoItem(
     bool IsVirtual,
     bool IsOverride,
     bool IsAbstract,
-    Models.SymbolLocation Location
+    Models.SymbolLocation Location,
+    string? ContainingType,
+    string? ReturnType,
+    IReadOnlyList<string> Parameters
 );
 
 public record MethodInfoItem(
@@ -522,33 +499,55 @@ public record GetTypeMembersResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"## Type Members: `{TypeName}`");
         sb.AppendLine();
         sb.AppendLine($"**Total: {MembersData.TotalCount} member{(MembersData.TotalCount != 1 ? "s" : "")}**");
         sb.AppendLine();
 
-        // Group by kind
-        var grouped = MembersData.Members.GroupBy(m => m.Kind);
+        // Group by file first, then by kind
+        var groupedByFile = MembersData.Members.GroupBy(m => m.Location.FilePath);
 
-        foreach (var group in grouped.OrderBy(g => g.Key))
+        foreach (var fileGroup in groupedByFile)
         {
-            sb.AppendLine($"### {group.Key}");
+            var fileName = System.IO.Path.GetFileName(fileGroup.Key);
+            sb.AppendLine($"### {fileName}");
             sb.AppendLine();
 
-            foreach (var member in group)
+            // Within each file, group by kind
+            var groupedByKind = fileGroup.GroupBy(m => m.Kind);
+
+            foreach (var kindGroup in groupedByKind.OrderBy(g => g.Key))
             {
-                var fileName = System.IO.Path.GetFileName(member.Location.FilePath);
-                var modifiers = new List<string>();
-                if (member.IsStatic) modifiers.Add("static");
-                if (member.IsVirtual) modifiers.Add("virtual");
-                if (member.IsOverride) modifiers.Add("override");
-                if (member.IsAbstract) modifiers.Add("abstract");
+                sb.AppendLine($"#### {kindGroup.Key}");
+                sb.AppendLine();
 
-                var modifierStr = modifiers.Count > 0 ? string.Join(" ", modifiers) + " " : "";
-                sb.AppendLine($"- **{member.Name}** ({member.Accessibility} {modifierStr}{member.Kind}) - {fileName}:{member.Location.StartLine}");
+                foreach (var member in kindGroup)
+                {
+                    var modifiers = new List<string>();
+                    if (member.IsStatic) modifiers.Add("static");
+                    if (member.IsVirtual) modifiers.Add("virtual");
+                    if (member.IsOverride) modifiers.Add("override");
+                    if (member.IsAbstract) modifiers.Add("abstract");
+
+                    var modifierStr = modifiers.Count > 0 ? string.Join(" ", modifiers) + " " : "";
+                    var displayName = GetDisplayName(member.Name, member.ContainingType);
+
+                    // Build signature string
+                    var signature = "";
+                    if (!string.IsNullOrEmpty(member.ReturnType) || (member.Parameters != null && member.Parameters.Count > 0))
+                    {
+                        var returnType = !string.IsNullOrEmpty(member.ReturnType) ? $"{member.ReturnType} " : "";
+                        var paramsStr = member.Parameters != null && member.Parameters.Count > 0
+                            ? $"({string.Join(", ", member.Parameters)})"
+                            : "()";
+                        signature = $" `{returnType}{displayName}{paramsStr}`";
+                    }
+
+                    sb.AppendLine($"- **{displayName}** ({member.Accessibility} {modifierStr}{member.Kind}) - L{member.Location.StartLine}-{member.Location.EndLine}{signature}");
+                }
+                sb.AppendLine();
             }
-            sb.AppendLine();
         }
 
         return sb.ToString();
@@ -564,7 +563,9 @@ public record SymbolCompleteData(
     string? SourceCode,
     IReadOnlyList<SymbolReference> References,
     InheritanceHierarchyData? Inheritance,
-    CallGraphResponse? CallGraph
+    CallGraphResponse? CallGraph,
+    bool IsSourceTruncated,
+    int TotalSourceLines
 );
 
 public record GetSymbolCompleteResponse(
@@ -575,13 +576,17 @@ public record GetSymbolCompleteResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"## Symbol: `{SymbolName}`");
+        var sb = new StringBuilder();
+        var displayName = GetDisplayName(Data.BasicInfo);
+        sb.AppendLine($"## Symbol: `{displayName}`");
         sb.AppendLine();
 
         // Basic info
         sb.AppendLine($"**Type**: {Data.BasicInfo.Kind}");
-        sb.AppendLine($"**Location**: [{System.IO.Path.GetFileName(Data.BasicInfo.Location.FilePath)}]({Data.BasicInfo.Location.FilePath}#{Data.BasicInfo.Location.StartLine})");
+
+        // Use relative path
+        var relativePath = GetRelativePath(Data.BasicInfo.Location.FilePath);
+        sb.AppendLine($"**Location**: {relativePath}:L{Data.BasicInfo.Location.StartLine}-{Data.BasicInfo.Location.EndLine}");
         sb.AppendLine();
 
         // Signature
@@ -593,7 +598,7 @@ public record GetSymbolCompleteResponse(
             var paramsStr = Data.BasicInfo.Signature.Parameters.Count > 0
                 ? string.Join(", ", Data.BasicInfo.Signature.Parameters)
                 : "";
-            sb.AppendLine($"{returnType}{Data.BasicInfo.Name}({paramsStr});");
+            sb.AppendLine($"{returnType}{displayName}({paramsStr});");
             sb.AppendLine("```");
             sb.AppendLine();
         }
@@ -606,28 +611,50 @@ public record GetSymbolCompleteResponse(
             sb.AppendLine();
         }
 
-        // Source code
+        // Source code (always include for methods)
         if (!string.IsNullOrEmpty(Data.SourceCode))
         {
             sb.AppendLine("**Source Code**:");
             sb.AppendLine("```csharp");
             sb.AppendLine(Data.SourceCode);
             sb.AppendLine("```");
+
+            if (Data.IsSourceTruncated)
+            {
+                var linesShown = Data.SourceCode.Split('\n').Length;
+                var remaining = Data.TotalSourceLines - linesShown;
+                sb.AppendLine($"*... {remaining} more lines hidden*");
+            }
             sb.AppendLine();
         }
 
-        // References
+        // References - 按文件分组
         if (Data.References.Count > 0)
         {
             sb.AppendLine($"**References** ({Data.References.Count}):");
-            foreach (var @ref in Data.References.Take(20))
+            var groupedByFile = Data.References.GroupBy(r => r.Location.FilePath);
+
+            foreach (var fileGroup in groupedByFile.Take(10))
             {
-                var fileName = System.IO.Path.GetFileName(@ref.Location.FilePath);
-                sb.AppendLine($"- {fileName}:{@ref.Location.StartLine} in {@ref.ContainingSymbol}");
+                var refPath = GetRelativePath(fileGroup.Key);
+                sb.AppendLine($"  - {refPath}:");
+                foreach (var @ref in fileGroup.Take(3))
+                {
+                    var lineRange = @ref.Location.EndLine > @ref.Location.StartLine
+                        ? $"L{@ref.Location.StartLine}-{@ref.Location.EndLine}"
+                        : $"L{@ref.Location.StartLine}";
+                    var lineInfo = @ref.LineText != null ? $" - {@ref.LineText.Trim()}" : "";
+                    sb.AppendLine($"    - {lineRange}{lineInfo}");
+                }
+                if (fileGroup.Count() > 3)
+                {
+                    sb.AppendLine($"    - ... and {fileGroup.Count() - 3} more in this file");
+                }
             }
-            if (Data.References.Count > 20)
+            if (groupedByFile.Count() > 10)
             {
-                sb.AppendLine($"- ... and {Data.References.Count - 20} more");
+                var remainingRefs = groupedByFile.Skip(10).Sum(g => g.Count());
+                sb.AppendLine($"  - ... and {remainingRefs} more in other files");
             }
             sb.AppendLine();
         }
@@ -683,7 +710,7 @@ public record BatchGetSymbolsResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"## Batch Symbol Query Results");
         sb.AppendLine();
         sb.AppendLine($"**Total**: {TotalCount} | **Success**: {SuccessCount} | **Errors**: {ErrorCount}");
@@ -693,14 +720,15 @@ public record BatchGetSymbolsResponse(
         {
             if (result.Error != null)
             {
-                sb.AppendLine($"### ❌ {result.SymbolName ?? "Unknown"}");
+                sb.AppendLine($"### [ERROR] {result.SymbolName ?? "Unknown"}");
                 sb.AppendLine($"Error: {result.Error}");
                 sb.AppendLine();
             }
             else if (result.Symbol != null)
             {
                 var fileName = System.IO.Path.GetFileName(result.Symbol.Location.FilePath);
-                sb.AppendLine($"### ✅ {result.Symbol.Name}");
+                var displayName = GetDisplayName(result.Symbol);
+                sb.AppendLine($"### {displayName}");
                 sb.AppendLine($"- Type: {result.Symbol.Kind}");
                 sb.AppendLine($"- Location: {fileName}:{result.Symbol.Location.StartLine}");
                 if (result.Symbol.Signature != null)
@@ -709,12 +737,43 @@ public record BatchGetSymbolsResponse(
                     var paramsStr = result.Symbol.Signature.Parameters.Count > 0
                         ? string.Join(", ", result.Symbol.Signature.Parameters)
                         : "";
-                    sb.AppendLine($"- Signature: {returnType}{result.Symbol.Name}({paramsStr})");
+                    sb.AppendLine($"- Signature: {returnType}{displayName}({paramsStr})");
                 }
                 sb.AppendLine();
             }
         }
 
+        return sb.ToString();
+    }
+}
+
+/// <summary>
+/// load_workspace 输出
+/// </summary>
+public record LoadWorkspaceResponse(
+    string Path,
+    WorkspaceKind Kind,
+    int ProjectCount,
+    int DocumentCount
+) : ToolResponse
+{
+    public override string ToMarkdown()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Workspace Loaded");
+        sb.AppendLine();
+        sb.AppendLine($"**Path**: `{Path}`");
+        sb.AppendLine($"**Type**: {Kind}");
+        sb.AppendLine($"**Projects**: {ProjectCount}");
+        sb.AppendLine($"**Documents**: {DocumentCount}");
+        sb.AppendLine();
+        sb.AppendLine("You can now use other C# analysis tools:");
+        sb.AppendLine("- `SearchSymbols` - Search for symbols by name");
+        sb.AppendLine("- `GetSymbols` - Get symbols from a file");
+        sb.AppendLine("- `GoToDefinition` - Navigate to symbol definition");
+        sb.AppendLine("- `FindReferences` - Find all references to a symbol");
+        sb.AppendLine("- `GetDiagnostics` - Check for compilation errors");
+        sb.AppendLine();
         return sb.ToString();
     }
 }
@@ -749,7 +808,7 @@ public record GetDiagnosticsResponse(
 {
     public override string ToMarkdown()
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"## Diagnostics Report");
         sb.AppendLine();
 
@@ -772,16 +831,16 @@ public record GetDiagnosticsResponse(
 
             foreach (var diag in group)
             {
-                var severityIcon = diag.Severity switch
+                var severityLabel = diag.Severity switch
                 {
-                    DiagnosticSeverity.Error => "❌",
-                    DiagnosticSeverity.Warning => "⚠️",
-                    DiagnosticSeverity.Info => "ℹ️",
-                    DiagnosticSeverity.Hidden => "🔍",
-                    _ => "•"
+                    DiagnosticSeverity.Error => "[ERROR]",
+                    DiagnosticSeverity.Warning => "[WARNING]",
+                    DiagnosticSeverity.Info => "[INFO]",
+                    DiagnosticSeverity.Hidden => "[HIDDEN]",
+                    _ => "[?]"
                 };
 
-                sb.AppendLine($"- {severityIcon} **{diag.Id}** (Line {diag.StartLine}): {diag.Message}");
+                sb.AppendLine($"- {severityLabel} **{diag.Id}** (Line {diag.StartLine}): {diag.Message}");
             }
             sb.AppendLine();
         }
@@ -789,4 +848,3 @@ public record GetDiagnosticsResponse(
         return sb.ToString();
     }
 }
-

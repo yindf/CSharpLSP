@@ -4,6 +4,7 @@ using ModelContextProtocol.Server;
 using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
+using System.Text;
 
 namespace CSharpMcp.Server.Tools.HighValue;
 
@@ -17,7 +18,7 @@ public class GetCallGraphTool
     /// Get the call graph for a method showing callers and callees
     /// </summary>
     [McpServerTool]
-    public static async Task<CallGraphResponse> GetCallGraph(
+    public static async Task<string> GetCallGraph(
         GetCallGraphParams parameters,
         IWorkspaceManager workspaceManager,
         ISymbolAnalyzer symbolAnalyzer,
@@ -40,13 +41,13 @@ public class GetCallGraphTool
             if (symbol == null)
             {
                 logger.LogWarning("Method not found: {SymbolName}", parameters.SymbolName ?? "at specified location");
-                throw new FileNotFoundException($"Method not found: {parameters.SymbolName ?? "at specified location"}");
+                return GetNoSymbolFoundHelpResponse(parameters.FilePath, parameters.LineNumber, parameters.SymbolName);
             }
 
             if (symbol is not IMethodSymbol method)
             {
                 logger.LogWarning("Symbol is not a method: {SymbolName}", symbol.Name);
-                throw new ArgumentException($"Symbol '{symbol.Name}' is not a method");
+                return GetNotAMethodHelpResponse(symbol.Name, symbol.Kind.ToString(), parameters.FilePath, parameters.LineNumber);
             }
 
             // Get the solution
@@ -57,7 +58,7 @@ public class GetCallGraphTool
                 method,
                 solution,
                 parameters.Direction,
-                parameters.MaxDepth,
+                parameters.GetMaxDepth(),
                 cancellationToken);
 
             // Convert to response format
@@ -85,7 +86,7 @@ public class GetCallGraphTool
 
             logger.LogDebug("Retrieved call graph for: {MethodName}", graph.MethodName);
 
-            return new CallGraphResponse(graph.MethodName, callers, callees, statistics);
+            return new CallGraphResponse(graph.MethodName, callers, callees, statistics).ToMarkdown();
         }
         catch (Exception ex)
         {
@@ -141,5 +142,66 @@ public class GetCallGraphTool
         }
 
         return (symbol, document);
+    }
+
+    /// <summary>
+    /// Generate helpful error response when no symbol is found
+    /// </summary>
+    private static string GetNoSymbolFoundHelpResponse(string filePath, int? lineNumber, string? symbolName)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## No Symbol Found");
+        sb.AppendLine();
+        if (!string.IsNullOrEmpty(symbolName))
+        {
+            sb.AppendLine($"**Symbol Name**: {symbolName}");
+        }
+        if (lineNumber.HasValue)
+        {
+            sb.AppendLine($"**Line Number**: {lineNumber.Value}");
+        }
+        sb.AppendLine($"**File**: {filePath}");
+        sb.AppendLine();
+        sb.AppendLine("**Tips**:");
+        sb.AppendLine("- Line numbers should point to a method declaration");
+        sb.AppendLine("- Use `GetSymbols` first to find valid line numbers for methods");
+        sb.AppendLine("- Or provide a valid `symbolName` parameter");
+        sb.AppendLine();
+        sb.AppendLine("**Usage**:");
+        sb.AppendLine("```");
+        sb.AppendLine("GetCallGraph(");
+        sb.AppendLine("    filePath: \"path/to/File.cs\",");
+        sb.AppendLine("    lineNumber: 42,  // Line where method is declared");
+        sb.AppendLine("    direction: 1  // 1=callers, 2=callees, 0=both");
+        sb.AppendLine(")");
+        sb.AppendLine("```");
+        sb.AppendLine();
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Generate helpful error response when symbol is not a method
+    /// </summary>
+    private static string GetNotAMethodHelpResponse(string symbolName, string symbolKind, string filePath, int? lineNumber)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Not a Method");
+        sb.AppendLine();
+        sb.AppendLine($"**Symbol**: `{symbolName}`");
+        sb.AppendLine($"**Kind**: {symbolKind}");
+        sb.AppendLine();
+        sb.AppendLine("The symbol at the specified location is not a method.");
+        sb.AppendLine();
+        sb.AppendLine("**Tips**:");
+        sb.AppendLine("- Use `GetSymbols` first to find valid method declarations");
+        sb.AppendLine("- Ensure the line number points to a method declaration");
+        sb.AppendLine("- Properties, fields, and other members don't have call graphs");
+        sb.AppendLine();
+        sb.AppendLine("**Direction Values**:");
+        sb.AppendLine("- `0` = Both (callers and callees)");
+        sb.AppendLine("- `1` = In (callers only)");
+        sb.AppendLine("- `2` = Out (callees only)");
+        sb.AppendLine();
+        return sb.ToString();
     }
 }

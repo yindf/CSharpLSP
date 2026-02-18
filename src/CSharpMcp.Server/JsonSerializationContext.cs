@@ -26,6 +26,7 @@ namespace CSharpMcp.Server;
 [JsonSerializable(typeof(GetSymbolCompleteParams))]
 [JsonSerializable(typeof(BatchGetSymbolsParams))]
 [JsonSerializable(typeof(GetDiagnosticsParams))]
+[JsonSerializable(typeof(LoadWorkspaceParams))]
 
 // Response types
 [JsonSerializable(typeof(GetSymbolsResponse))]
@@ -40,6 +41,7 @@ namespace CSharpMcp.Server;
 [JsonSerializable(typeof(BatchGetSymbolsResponse))]
 [JsonSerializable(typeof(GetDiagnosticsResponse))]
 [JsonSerializable(typeof(ErrorResponse))]
+[JsonSerializable(typeof(LoadWorkspaceResponse))]
 
 // Core model types (from Models namespace)
 [JsonSerializable(typeof(SymbolInfo))]
@@ -54,6 +56,7 @@ namespace CSharpMcp.Server;
 [JsonSerializable(typeof(SymbolCompleteSections))]
 [JsonSerializable(typeof(DiagnosticSeverity))]
 [JsonSerializable(typeof(CallGraphDirection))]
+[JsonSerializable(typeof(WorkspaceKind))]
 
 public partial class JsonSerializationContext : JsonSerializerContext
 {
@@ -71,6 +74,7 @@ public static class McpJsonOptions
     {
         TypeInfoResolver = JsonSerializationContext.Default,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false
+        WriteIndented = false,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: true) }
     };
 }
