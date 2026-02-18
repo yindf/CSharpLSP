@@ -17,6 +17,8 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
     private Solution? _currentSolution;
     private string? _loadedPath;
     private DateTime _lastUpdate;
+    private FileWatcherService? _fileWatcher;
+    private int _isCompiling;
 
     public WorkspaceManager(ILogger<WorkspaceManager> logger)
     {
@@ -130,6 +132,9 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
 
             // Clear cache when loading new workspace
             _compilationCache.Clear();
+
+            // Start file watcher for automatic workspace updates
+            StartFileWatcher();
 
             var info = new WorkspaceInfo(
                 _loadedPath,
@@ -450,6 +455,7 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
 
     public void Dispose()
     {
+        StopFileWatcher();
         _loadLock.Dispose();
         _workspace.Dispose();
     }
