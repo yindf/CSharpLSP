@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using CSharpMcp.Server.Models;
@@ -28,34 +28,16 @@ namespace CSharpMcp.Server;
 [JsonSerializable(typeof(GetDiagnosticsParams))]
 [JsonSerializable(typeof(LoadWorkspaceParams))]
 
-// Response types
-[JsonSerializable(typeof(GetSymbolsResponse))]
-[JsonSerializable(typeof(GoToDefinitionResponse))]
-[JsonSerializable(typeof(FindReferencesResponse))]
-[JsonSerializable(typeof(ResolveSymbolResponse))]
-[JsonSerializable(typeof(SearchSymbolsResponse))]
-[JsonSerializable(typeof(InheritanceHierarchyResponse))]
-[JsonSerializable(typeof(CallGraphResponse))]
-[JsonSerializable(typeof(GetTypeMembersResponse))]
-[JsonSerializable(typeof(GetSymbolCompleteResponse))]
-[JsonSerializable(typeof(BatchGetSymbolsResponse))]
+// Response types (only remaining types after refactoring)
 [JsonSerializable(typeof(GetDiagnosticsResponse))]
+[JsonSerializable(typeof(DiagnosticItem))]
+[JsonSerializable(typeof(DiagnosticsSummary))]
 [JsonSerializable(typeof(ErrorResponse))]
 [JsonSerializable(typeof(LoadWorkspaceResponse))]
 
-// Core model types (from Models namespace)
-[JsonSerializable(typeof(SymbolInfo))]
-[JsonSerializable(typeof(SymbolLocation))]
-[JsonSerializable(typeof(SymbolReference))]
-[JsonSerializable(typeof(Accessibility))]
-
-// Enums
+// Enums (from Tools namespace)
 [JsonSerializable(typeof(DetailLevel))]
-[JsonSerializable(typeof(SymbolKind))]
-[JsonSerializable(typeof(Accessibility))]
-[JsonSerializable(typeof(SymbolCompleteSections))]
 [JsonSerializable(typeof(DiagnosticSeverity))]
-[JsonSerializable(typeof(CallGraphDirection))]
 [JsonSerializable(typeof(WorkspaceKind))]
 
 public partial class JsonSerializationContext : JsonSerializerContext

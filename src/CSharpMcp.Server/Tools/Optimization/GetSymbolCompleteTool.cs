@@ -1,13 +1,13 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
 
@@ -29,7 +29,6 @@ public class GetSymbolCompleteTool
         IWorkspaceManager workspaceManager,
         ISymbolAnalyzer symbolAnalyzer,
         IInheritanceAnalyzer inheritanceAnalyzer,
-        ICallGraphAnalyzer callGraphAnalyzer,
         ILogger<GetSymbolCompleteTool> logger,
         CancellationToken cancellationToken)
     {
@@ -51,202 +50,251 @@ public class GetSymbolCompleteTool
                 throw new FileNotFoundException($"Symbol not found: {parameters.SymbolName ?? "at specified location"}");
             }
 
-            // Get basic info
-            var info = await symbolAnalyzer.ToSymbolInfoAsync(
+            // Build complete Markdown
+            var result = await BuildCompleteMarkdownAsync(
                 symbol,
-                parameters.DetailLevel,
-                parameters.Sections.HasFlag(SymbolCompleteSections.SourceCode) ? parameters.GetBodyMaxLines() : null,
+                document,
+                parameters,
+                symbolAnalyzer,
+                inheritanceAnalyzer,
+                logger,
                 cancellationToken);
-
-            // Get documentation
-            string? documentation = null;
-            if (parameters.Sections.HasFlag(SymbolCompleteSections.Documentation))
-            {
-                documentation = info.Documentation;
-            }
-
-            // Get source code (always include for methods, otherwise based on sections)
-            string? sourceCode = null;
-            bool isSourceTruncated = false;
-            int totalSourceLines = 0;
-            bool isMethod = symbol.Kind == SymbolKind.Method;
-            if (parameters.Sections.HasFlag(SymbolCompleteSections.SourceCode) || isMethod)
-            {
-                // For methods, always include source code
-                sourceCode = await symbolAnalyzer.ExtractSourceCodeAsync(
-                    symbol,
-                    isMethod, // include body for methods
-                    parameters.GetBodyMaxLines(),
-                    cancellationToken);
-
-                // Calculate truncation info
-                if (isMethod && !string.IsNullOrEmpty(sourceCode))
-                {
-                    var locations = symbol.Locations;
-                    if (locations.Length > 0)
-                    {
-                        var lineSpan = locations[0].GetLineSpan();
-                        totalSourceLines = lineSpan.EndLinePosition.Line - lineSpan.StartLinePosition.Line + 1;
-                        var linesShown = sourceCode.Split('\n').Length;
-                        isSourceTruncated = parameters.GetBodyMaxLines() > 0 && parameters.GetBodyMaxLines() < totalSourceLines;
-                    }
-                }
-            }
-
-            // Get references
-            List<Models.SymbolReference> references = new();
-            if (parameters.Sections.HasFlag(SymbolCompleteSections.References) && parameters.IncludeReferences)
-            {
-                try
-                {
-                    var solution = document.Project.Solution;
-                    var referencedSymbols = await symbolAnalyzer.FindReferencesAsync(
-                        symbol,
-                        solution,
-                        cancellationToken);
-
-                    foreach (var refSym in referencedSymbols.Take(parameters.GetMaxReferences()))
-                    {
-                        foreach (var loc in refSym.Locations)
-                        {
-                            var location = new Models.SymbolLocation(
-                                loc.Document.FilePath,
-                                loc.Location.GetLineSpan().StartLinePosition.Line + 1,
-                                loc.Location.GetLineSpan().EndLinePosition.Line + 1,
-                                loc.Location.GetLineSpan().StartLinePosition.Character + 1,
-                                loc.Location.GetLineSpan().EndLinePosition.Character + 1
-                            );
-
-                            // Extract line text
-                            var lineText = await ExtractLineTextAsync(loc.Document, location.StartLine, cancellationToken);
-
-                            references.Add(new Models.SymbolReference(
-                                location,
-                                refSym.Definition?.Name ?? "Unknown",
-                                null,
-                                lineText
-                            ));
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Failed to get references for symbol: {SymbolName}", symbol.Name);
-                }
-            }
-
-            // Get inheritance info
-            InheritanceHierarchyData? inheritance = null;
-            if (parameters.Sections.HasFlag(SymbolCompleteSections.Inheritance) && parameters.IncludeInheritance)
-            {
-                if (symbol is INamedTypeSymbol type)
-                {
-                    try
-                    {
-                        var solution = document.Project.Solution;
-                        var tree = await inheritanceAnalyzer.GetInheritanceTreeAsync(
-                            type,
-                            solution,
-                            includeDerived: false,
-                            maxDerivedDepth: 0,
-                            cancellationToken);
-
-                        inheritance = new InheritanceHierarchyData(
-                            TypeName: type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                            Kind: type.TypeKind switch
-                            {
-                                TypeKind.Class => Models.SymbolKind.Class,
-                                TypeKind.Interface => Models.SymbolKind.Interface,
-                                TypeKind.Struct => Models.SymbolKind.Struct,
-                                TypeKind.Enum => Models.SymbolKind.Enum,
-                                TypeKind.Delegate => Models.SymbolKind.Delegate,
-                                _ => Models.SymbolKind.Unknown
-                            },
-                            BaseTypes: tree.BaseTypes,
-                            Interfaces: tree.Interfaces,
-                            DerivedTypes: Array.Empty<Models.SymbolInfo>(),
-                            Depth: 0
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Failed to get inheritance for symbol: {SymbolName}", symbol.Name);
-                    }
-                }
-            }
-
-            // Get call graph
-            CallGraphResponse? callGraph = null;
-            if (parameters.Sections.HasFlag(SymbolCompleteSections.CallGraph) && parameters.IncludeCallGraph)
-            {
-                if (symbol is IMethodSymbol method)
-                {
-                    try
-                    {
-                        var solution = document.Project.Solution;
-                        var graph = await callGraphAnalyzer.GetCallGraphAsync(
-                            method,
-                            solution,
-                            CallGraphDirection.Both,
-                            parameters.GetCallGraphMaxDepth(),
-                            cancellationToken);
-
-                        var callers = graph.Callers.Select(c => new CallRelationshipItem(
-                            c.Symbol,
-                            c.CallLocations.Select(loc => new CallLocationItem(
-                                loc.ContainingSymbol,
-                                loc.Location
-                            )).ToList()
-                        )).ToList();
-
-                        var callees = graph.Callees.Select(c => new CallRelationshipItem(
-                            c.Symbol,
-                            c.CallLocations.Select(loc => new CallLocationItem(
-                                loc.ContainingSymbol,
-                                loc.Location
-                            )).ToList()
-                        )).ToList();
-
-                        var statistics = new CallStatisticsItem(
-                            graph.Statistics.TotalCallers,
-                            graph.Statistics.TotalCallees,
-                            graph.Statistics.CyclomaticComplexity
-                        );
-
-                        callGraph = new CallGraphResponse(
-                            graph.MethodName,
-                            callers,
-                            callees,
-                            statistics
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Failed to get call graph for symbol: {SymbolName}", symbol.Name);
-                    }
-                }
-            }
-
-            var completeData = new SymbolCompleteData(
-                BasicInfo: info,
-                Documentation: documentation,
-                SourceCode: sourceCode,
-                References: references,
-                Inheritance: inheritance,
-                CallGraph: callGraph,
-                IsSourceTruncated: isSourceTruncated,
-                TotalSourceLines: totalSourceLines
-            );
 
             logger.LogDebug("Retrieved complete symbol info for: {SymbolName}", symbol.Name);
 
-            return new GetSymbolCompleteResponse(symbol.Name, completeData, false).ToMarkdown();
+            return result;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing GetSymbolCompleteTool");
             throw;
         }
+    }
+
+    private static async Task<string> BuildCompleteMarkdownAsync(
+        ISymbol symbol,
+        Document document,
+        GetSymbolCompleteParams parameters,
+        ISymbolAnalyzer symbolAnalyzer,
+        IInheritanceAnalyzer inheritanceAnalyzer,
+        ILogger<GetSymbolCompleteTool> logger,
+        CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        var displayName = symbol.GetDisplayName();
+        var (startLine, endLine) = symbol.GetLineRange();
+        var filePath = symbol.GetFilePath();
+        var kind = symbol.GetDisplayKind();
+
+        sb.AppendLine($"# Complete Symbol Information: `{displayName}`");
+        sb.AppendLine();
+
+        // ========== Basic Info Section ==========
+        if (parameters.Sections.HasFlag(SymbolCompleteSections.Basic))
+        {
+            sb.AppendLine("## Basic Information");
+            sb.AppendLine();
+            sb.AppendLine($"- **Name**: `{displayName}`");
+            sb.AppendLine($"- **Kind**: {kind}");
+            sb.AppendLine($"- **Accessibility**: {symbol.GetAccessibilityString()}");
+
+            var containingType = symbol.GetContainingTypeName();
+            if (!string.IsNullOrEmpty(containingType))
+                sb.AppendLine($"- **Containing Type**: {containingType}");
+
+            var ns = symbol.GetNamespace();
+            if (!string.IsNullOrEmpty(ns))
+                sb.AppendLine($"- **Namespace**: {ns}");
+
+            if (startLine > 0)
+            {
+                var fileName = System.IO.Path.GetFileName(filePath);
+                sb.AppendLine($"- **Location**: `{fileName}:{startLine}-{endLine}`");
+            }
+
+            var signature = symbol.GetSignature();
+            if (!string.IsNullOrEmpty(signature))
+            {
+                sb.AppendLine($"- **Signature**: `{signature}`");
+            }
+
+            var modifiers = new List<string>();
+            if (symbol.IsStatic) modifiers.Add("static");
+            if (symbol.IsVirtual) modifiers.Add("virtual");
+            if (symbol.IsOverride) modifiers.Add("override");
+            if (symbol.IsAbstract) modifiers.Add("abstract");
+            if (modifiers.Count > 0)
+            {
+                sb.AppendLine($"- **Modifiers**: {string.Join(", ", modifiers)}");
+            }
+
+            sb.AppendLine();
+        }
+
+        // ========== Documentation Section ==========
+        if (parameters.Sections.HasFlag(SymbolCompleteSections.Documentation))
+        {
+            var summary = symbol.GetSummaryComment();
+            var fullComment = symbol.GetFullComment();
+
+            if (!string.IsNullOrEmpty(summary) || !string.IsNullOrEmpty(fullComment))
+            {
+                sb.AppendLine("## Documentation");
+                sb.AppendLine();
+
+                if (!string.IsNullOrEmpty(fullComment))
+                {
+                    sb.AppendLine(fullComment);
+                }
+                else if (!string.IsNullOrEmpty(summary))
+                {
+                    sb.AppendLine(summary);
+                }
+
+                sb.AppendLine();
+            }
+        }
+
+        // ========== Source Code Section ==========
+        if (parameters.Sections.HasFlag(SymbolCompleteSections.SourceCode))
+        {
+            var isMethod = symbol.Kind == SymbolKind.Method;
+            var maxLines = parameters.GetBodyMaxLines();
+
+            if (isMethod || parameters.DetailLevel >= Models.DetailLevel.Full)
+            {
+                var implementation = await symbol.GetFullImplementationAsync(maxLines, cancellationToken);
+                if (!string.IsNullOrEmpty(implementation))
+                {
+                    sb.AppendLine("## Source Code");
+                    sb.AppendLine();
+
+                    var totalLines = endLine - startLine + 1;
+                    if (maxLines < totalLines)
+                    {
+                        sb.AppendLine($"(showing {maxLines} of {totalLines} total lines)");
+                        sb.AppendLine();
+                    }
+
+                    sb.AppendLine("```csharp");
+                    sb.AppendLine(implementation);
+                    sb.AppendLine("```");
+                    sb.AppendLine();
+                }
+            }
+        }
+
+        // ========== References Section ==========
+        if (parameters.Sections.HasFlag(SymbolCompleteSections.References) && parameters.IncludeReferences)
+        {
+            try
+            {
+                var solution = document.Project.Solution;
+                var referencedSymbols = await symbolAnalyzer.FindReferencesAsync(
+                    symbol,
+                    solution,
+                    cancellationToken);
+
+                if (referencedSymbols.Count > 0)
+                {
+                    sb.AppendLine($"## References (showing first {Math.Min(parameters.GetMaxReferences(), referencedSymbols.Count)} locations)");
+                    sb.AppendLine();
+
+                    int shownLocations = 0;
+                    foreach (var refSym in referencedSymbols.Take(parameters.GetMaxReferences()))
+                    {
+                        foreach (var loc in refSym.Locations.Take(2))
+                        {
+                            var refFilePath = loc.Document.FilePath;
+                            var refFileName = System.IO.Path.GetFileName(refFilePath);
+                            var refLineSpan = loc.Location.GetLineSpan();
+                            var refLine = refLineSpan.StartLinePosition.Line + 1;
+
+                            sb.AppendLine($"- `{refFileName}:{refLine}`");
+
+                            shownLocations++;
+                            if (shownLocations >= parameters.GetMaxReferences())
+                                break;
+                        }
+                        if (shownLocations >= parameters.GetMaxReferences())
+                            break;
+                    }
+
+                    sb.AppendLine();
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to get references for symbol: {SymbolName}", symbol.Name);
+            }
+        }
+
+        // ========== Inheritance Section ==========
+        if (parameters.Sections.HasFlag(SymbolCompleteSections.Inheritance) && parameters.IncludeInheritance)
+        {
+            if (symbol is INamedTypeSymbol type)
+            {
+                try
+                {
+                    var solution = document.Project.Solution;
+                    var tree = await inheritanceAnalyzer.GetInheritanceTreeAsync(
+                        type,
+                        solution,
+                        includeDerived: false,
+                        maxDerivedDepth: 0,
+                        cancellationToken);
+
+                    if (tree.BaseTypes.Count > 0 || tree.Interfaces.Count > 0)
+                    {
+                        sb.AppendLine("## Inheritance");
+                        sb.AppendLine();
+
+                        if (tree.BaseTypes.Count > 0)
+                        {
+                            sb.AppendLine("### Base Types");
+                            foreach (var baseType in tree.BaseTypes)
+                            {
+                                sb.AppendLine($"- {baseType.ToDisplayString()}");
+                            }
+                            sb.AppendLine();
+                        }
+
+                        if (tree.Interfaces.Count > 0)
+                        {
+                            sb.AppendLine("### Interfaces");
+                            foreach (var iface in tree.Interfaces)
+                            {
+                                sb.AppendLine($"- {iface.ToDisplayString()}");
+                            }
+                            sb.AppendLine();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to get inheritance for symbol: {SymbolName}", symbol.Name);
+                }
+            }
+        }
+
+        // ========== Call Graph Section ==========
+        if (parameters.Sections.HasFlag(SymbolCompleteSections.CallGraph) && parameters.IncludeCallGraph)
+        {
+            if (symbol is IMethodSymbol method)
+            {
+                try
+                {
+                    var solution = document.Project.Solution;
+                    sb.Append(await method.GetCallGraphMarkdown(solution, cancellationToken));
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to get call graph for symbol: {SymbolName}", symbol.Name);
+                }
+            }
+        }
+
+        return sb.ToString();
     }
 
     private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(
@@ -286,27 +334,5 @@ public class GetSymbolCompleteTool
         }
 
         return (symbol, document);
-    }
-
-    private static async Task<string?> ExtractLineTextAsync(
-        Document document,
-        int lineNumber,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var sourceText = await document.GetTextAsync(cancellationToken);
-            var lines = sourceText.Lines;
-
-            if (lineNumber < 1 || lineNumber > lines.Count)
-                return null;
-
-            var lineIndex = lineNumber - 1;
-            return lines[lineIndex].ToString();
-        }
-        catch
-        {
-            return null;
-        }
     }
 }

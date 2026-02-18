@@ -100,7 +100,6 @@ internal sealed partial class WorkspaceManager
             if (applied)
             {
                 _currentSolution = newSolution;
-                _compilationCache.Clear();
                 _lastUpdate = DateTime.UtcNow;
                 _logger.LogInformation("Successfully applied {Count} file change(s): {Files}", fileChanges.Count, string.Join(", ", fileChanges.Keys));
             }
@@ -139,9 +138,6 @@ internal sealed partial class WorkspaceManager
                         break;
                     case FileChangeType.SourceFile:
                         sourceFiles.Add(filePath);
-                        break;
-                    case FileChangeType.Config:
-                        configFiles.Add(filePath);
                         break;
                 }
             }

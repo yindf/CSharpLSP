@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/CSharpMcp.Server/CSharpMcp.Server.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/CSharpMcp.IntegrationTests/CSharpMcp.IntegrationTests.csproj" />
-    <Project Path="tests/CSharpMcp.Tests/CSharpMcp.Tests.csproj" />
-  </Folder>
-</Solution>

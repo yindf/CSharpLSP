@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using CSharpMcp.Server.Models;
@@ -46,10 +46,6 @@ public record GetSymbolsParams : FileLocationParams
     /// </summary>
     public int BodyMaxLines { get; init; } = 100;
 
-    /// <summary>
-    /// 符号类型过滤
-    /// </summary>
-    public IReadOnlyList<Models.SymbolKind>? FilterKinds { get; init; }
 }
 
 /// <summary>
@@ -153,11 +149,6 @@ public record GetInheritanceHierarchyParams : FileLocationParams
 public record GetCallGraphParams : FileLocationParams
 {
     /// <summary>
-    /// 调用方向
-    /// </summary>
-    public CSharpMcp.Server.Roslyn.CallGraphDirection Direction { get; init; } = CSharpMcp.Server.Roslyn.CallGraphDirection.Both;
-
-    /// <summary>
     /// 最大深度
     /// </summary>
     public int MaxDepth { get; init; } = 2;
@@ -178,10 +169,6 @@ public record GetTypeMembersParams : FileLocationParams
     /// </summary>
     public bool IncludeInherited { get; init; } = false;
 
-    /// <summary>
-    /// 成员类型过滤
-    /// </summary>
-    public IReadOnlyList<Models.SymbolKind>? FilterKinds { get; init; }
 }
 
 /// <summary>

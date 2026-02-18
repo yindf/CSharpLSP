@@ -1,14 +1,14 @@
-using System;
+﻿using System;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
-using System.Text;
+using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace CSharpMcp.Server.Tools.HighValue;
 
@@ -26,7 +26,6 @@ public class GetCallGraphTool
         GetCallGraphParams parameters,
         IWorkspaceManager workspaceManager,
         ISymbolAnalyzer symbolAnalyzer,
-        ICallGraphAnalyzer callGraphAnalyzer,
         ILogger<GetCallGraphTool> logger,
         CancellationToken cancellationToken)
     {
@@ -54,43 +53,10 @@ public class GetCallGraphTool
                 return GetNotAMethodHelpResponse(symbol.Name, symbol.Kind.ToString(), parameters.FilePath, parameters.LineNumber);
             }
 
-            // Get the solution
             var solution = document.Project.Solution;
 
-            // Get call graph
-            var graph = await callGraphAnalyzer.GetCallGraphAsync(
-                method,
-                solution,
-                parameters.Direction,
-                parameters.GetMaxDepth(),
-                cancellationToken);
-
-            // Convert to response format
-            var callers = graph.Callers.Select(c => new CallRelationshipItem(
-                c.Symbol,
-                c.CallLocations.Select(loc => new CallLocationItem(
-                    loc.ContainingSymbol,
-                    loc.Location
-                )).ToList()
-            )).ToList();
-
-            var callees = graph.Callees.Select(c => new CallRelationshipItem(
-                c.Symbol,
-                c.CallLocations.Select(loc => new CallLocationItem(
-                    loc.ContainingSymbol,
-                    loc.Location
-                )).ToList()
-            )).ToList();
-
-            var statistics = new CallStatisticsItem(
-                graph.Statistics.TotalCallers,
-                graph.Statistics.TotalCallees,
-                graph.Statistics.CyclomaticComplexity
-            );
-
-            logger.LogDebug("Retrieved call graph for: {MethodName}", graph.MethodName);
-
-            return new CallGraphResponse(graph.MethodName, callers, callees, statistics).ToMarkdown();
+            // Build Markdown directly
+            return await method.GetCallGraphMarkdown(solution, cancellationToken);
         }
         catch (Exception ex)
         {

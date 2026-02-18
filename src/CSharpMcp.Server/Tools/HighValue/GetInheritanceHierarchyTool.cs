@@ -1,14 +1,13 @@
-using System;
+﻿using System;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
-using System.Text;
 
 namespace CSharpMcp.Server.Tools.HighValue;
 
@@ -68,33 +67,95 @@ public class GetInheritanceHierarchyTool
                 maxDepth,
                 cancellationToken);
 
-            // Build response - pass full SymbolInfo instead of just names
-            var hierarchyData = new InheritanceHierarchyData(
-                TypeName: type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                Kind: type.TypeKind switch
-                {
-                    TypeKind.Class => Models.SymbolKind.Class,
-                    TypeKind.Interface => Models.SymbolKind.Interface,
-                    TypeKind.Struct => Models.SymbolKind.Struct,
-                    TypeKind.Enum => Models.SymbolKind.Enum,
-                    TypeKind.Delegate => Models.SymbolKind.Delegate,
-                    _ => Models.SymbolKind.Unknown
-                },
-                BaseTypes: tree.BaseTypes,
-                Interfaces: tree.Interfaces,
-                DerivedTypes: tree.DerivedTypes,
-                Depth: tree.Depth
-            );
-
             logger.LogDebug("Retrieved inheritance hierarchy for: {TypeName}", type.Name);
 
-            return new InheritanceHierarchyResponse(type.Name, hierarchyData).ToMarkdown();
+            // Build Markdown directly
+            return BuildHierarchyMarkdown(type, tree, parameters);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing GetInheritanceHierarchyTool");
             throw;
         }
+    }
+
+    private static string BuildHierarchyMarkdown(
+        INamedTypeSymbol type,
+        InheritanceTree tree,
+        GetInheritanceHierarchyParams parameters)
+    {
+        var sb = new StringBuilder();
+        var typeName = type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+
+        sb.AppendLine($"## Inheritance Hierarchy: `{typeName}`");
+        sb.AppendLine();
+
+        // Type kind (use display kind to show record, class, struct, etc.)
+        var kind = type.GetNamedTypeKindDisplay();
+        sb.AppendLine($"**Kind**: {kind}");
+        sb.AppendLine();
+
+        // Base types
+        if (tree.BaseTypes.Count > 0)
+        {
+            sb.AppendLine($"### Base Types ({tree.BaseTypes.Count})");
+            sb.AppendLine();
+            foreach (var baseType in tree.BaseTypes)
+            {
+                var (startLine, endLine) = baseType.GetLineRange();
+                var filePath = baseType.GetFilePath();
+                sb.AppendLine($"- **{baseType.ToDisplayString()}**");
+                // 只在有有效文件路径时才显示位置信息
+                if (startLine > 0 && !string.IsNullOrEmpty(filePath))
+                {
+                    var fileName = System.IO.Path.GetFileName(filePath);
+                    sb.AppendLine($"  - `{fileName}:{startLine}`");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        // Interfaces
+        if (tree.Interfaces.Count > 0)
+        {
+            sb.AppendLine($"### Interfaces ({tree.Interfaces.Count})");
+            sb.AppendLine();
+            foreach (var iface in tree.Interfaces)
+            {
+                var (startLine, endLine) = iface.GetLineRange();
+                var filePath = iface.GetFilePath();
+                sb.AppendLine($"- **{iface.ToDisplayString()}**");
+                // 只在有有效文件路径时才显示位置信息
+                if (startLine > 0 && !string.IsNullOrEmpty(filePath))
+                {
+                    var fileName = System.IO.Path.GetFileName(filePath);
+                    sb.AppendLine($"  - `{fileName}:{startLine}`");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        // Derived types
+        if (parameters.IncludeDerived && tree.DerivedTypes.Count > 0)
+        {
+            sb.AppendLine($"### Derived Types ({tree.DerivedTypes.Count}, depth: {tree.Depth})");
+            sb.AppendLine();
+            foreach (var derived in tree.DerivedTypes)
+            {
+                var (startLine, endLine) = derived.GetLineRange();
+                var filePath = derived.GetFilePath();
+                sb.AppendLine($"- **{derived.ToDisplayString()}**");
+                // 只在有有效文件路径时才显示位置信息
+                if (startLine > 0 && !string.IsNullOrEmpty(filePath))
+                {
+                    var fileName = System.IO.Path.GetFileName(filePath);
+                    sb.AppendLine($"  - `{fileName}:{startLine}`");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
     }
 
     private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(

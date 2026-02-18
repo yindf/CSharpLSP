@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
@@ -19,27 +19,14 @@ public interface IInheritanceAnalyzer
         bool includeDerived,
         int maxDerivedDepth,
         CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 查找所有派生类型
-    /// </summary>
-    Task<IReadOnlyList<INamedTypeSymbol>> FindDerivedTypesAsync(
-        INamedTypeSymbol type,
-        Solution solution,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 获取继承链（基类链）
-    /// </summary>
-    IReadOnlyList<INamedTypeSymbol> GetBaseTypeChain(INamedTypeSymbol type);
 }
 
 /// <summary>
 /// 继承树
 /// </summary>
 public record InheritanceTree(
-    IReadOnlyList<Models.SymbolInfo> BaseTypes,
-    IReadOnlyList<Models.SymbolInfo> Interfaces,
-    IReadOnlyList<Models.SymbolInfo> DerivedTypes,
+    IReadOnlyList<INamedTypeSymbol> BaseTypes,
+    IReadOnlyList<INamedTypeSymbol> Interfaces,
+    IReadOnlyList<INamedTypeSymbol> DerivedTypes,
     int Depth
 );

@@ -1,12 +1,13 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
 
@@ -45,7 +46,7 @@ public class GoToDefinitionTool
                 var result = await TryFindByPositionAsync(parameters, workspaceManager, symbolAnalyzer, logger, cancellationToken);
                 if (result != null)
                 {
-                    return result.ToMarkdown();
+                    return result;
                 }
             }
 
@@ -55,7 +56,7 @@ public class GoToDefinitionTool
                 var result = await TryFindByNameAsync(parameters, workspaceManager, symbolAnalyzer, logger, cancellationToken);
                 if (result != null)
                 {
-                    return result.ToMarkdown();
+                    return result;
                 }
             }
 
@@ -72,7 +73,7 @@ public class GoToDefinitionTool
         }
     }
 
-    private static async Task<GoToDefinitionResponse?> TryFindByPositionAsync(
+    private static async Task<string?> TryFindByPositionAsync(
         GoToDefinitionParams parameters,
         IWorkspaceManager workspaceManager,
         ISymbolAnalyzer symbolAnalyzer,
@@ -94,13 +95,13 @@ public class GoToDefinitionTool
 
         if (symbol != null)
         {
-            return await CreateResponseAsync(symbol, parameters, symbolAnalyzer, logger, cancellationToken);
+            return await CreateResponseAsync(symbol, parameters, logger, cancellationToken);
         }
 
         return null;
     }
 
-    private static async Task<GoToDefinitionResponse?> TryFindByNameAsync(
+    private static async Task<string?> TryFindByNameAsync(
         GoToDefinitionParams parameters,
         IWorkspaceManager workspaceManager,
         ISymbolAnalyzer symbolAnalyzer,
@@ -121,36 +122,98 @@ public class GoToDefinitionTool
 
         if (symbols.Count > 0)
         {
-            return await CreateResponseAsync(symbols[0], parameters, symbolAnalyzer, logger, cancellationToken);
+            return await CreateResponseAsync(symbols[0], parameters, logger, cancellationToken);
         }
 
         return null;
     }
 
-    private static async Task<GoToDefinitionResponse> CreateResponseAsync(
-        Microsoft.CodeAnalysis.ISymbol symbol,
+    private static async Task<string> CreateResponseAsync(
+        ISymbol symbol,
         GoToDefinitionParams parameters,
-        ISymbolAnalyzer symbolAnalyzer,
         ILogger<GoToDefinitionTool> logger,
         CancellationToken cancellationToken)
     {
-        var info = await symbolAnalyzer.ToSymbolInfoAsync(
-            symbol,
-            parameters.DetailLevel,
-            parameters.IncludeBody ? parameters.GetBodyMaxLines() : null,
-            cancellationToken);
+        var displayName = symbol.GetDisplayName();
+        var (startLine, endLine) = symbol.GetLineRange();
+        var filePath = symbol.GetFilePath();
+        var relativePath = GetRelativePath(filePath);
+        var containingType = symbol.GetContainingTypeName();
 
-        // Calculate total lines in the full method span
-        var totalLines = info.Location.EndLine - info.Location.StartLine + 1;
-        // Calculate actual lines returned (may be truncated)
-        var sourceLines = info.SourceCode?.Split('\n').Length ?? 0;
-        var isTruncated = parameters.IncludeBody && parameters.GetBodyMaxLines() < totalLines;
+        // Calculate total lines
+        var totalLines = endLine - startLine + 1;
+        var bodyMaxLines = parameters.GetBodyMaxLines();
+        var isTruncated = parameters.IncludeBody && bodyMaxLines < totalLines;
 
         logger.LogDebug("Found definition: {SymbolName} at {FilePath}:{LineNumber}",
-            symbol.Name, info.Location.FilePath, info.Location.StartLine);
+            symbol.Name, filePath, startLine);
 
-        // Pass totalLines (full span) not sourceLines (truncated count)
-        return new GoToDefinitionResponse(info, isTruncated, totalLines);
+        // Build Markdown
+        var sb = new StringBuilder();
+        sb.AppendLine($"### Definition: `{displayName}`");
+
+        if (isTruncated)
+        {
+            sb.AppendLine($"(showing up to {bodyMaxLines} of {totalLines} total lines)");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("**Location**:");
+        sb.AppendLine($"- File: {relativePath}:{startLine}-{endLine}");
+
+        if (!string.IsNullOrEmpty(containingType))
+            sb.AppendLine($"- Containing Type: {containingType}");
+
+        var ns = symbol.GetNamespace();
+        if (!string.IsNullOrEmpty(ns))
+            sb.AppendLine($"- Namespace: {ns}");
+
+        sb.AppendLine();
+
+        // Show full method/implementation
+        if (parameters.IncludeBody)
+        {
+            var implementation = await symbol.GetFullImplementationAsync(bodyMaxLines, cancellationToken);
+            if (!string.IsNullOrEmpty(implementation))
+            {
+                sb.AppendLine("**Full Method**:");
+                sb.AppendLine("```csharp");
+                sb.AppendLine(implementation);
+                sb.AppendLine("```");
+
+                if (isTruncated)
+                {
+                    sb.AppendLine($"*... {totalLines - bodyMaxLines} more lines hidden*");
+                }
+            }
+        }
+
+        // Show documentation
+        if (parameters.DetailLevel >= Models.DetailLevel.Standard)
+        {
+            var summary = symbol.GetSummaryComment();
+            if (!string.IsNullOrEmpty(summary))
+            {
+                sb.AppendLine("**Documentation**:");
+                sb.AppendLine(summary);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string GetRelativePath(string filePath)
+    {
+        try
+        {
+            var currentDir = System.IO.Directory.GetCurrentDirectory();
+            var relativePath = System.IO.Path.GetRelativePath(currentDir, filePath);
+            return string.IsNullOrEmpty(relativePath) ? filePath : relativePath.Replace('\\', '/');
+        }
+        catch
+        {
+            return filePath.Replace('\\', '/');
+        }
     }
 
     private static string BuildErrorDetails(
@@ -159,7 +222,7 @@ public class GoToDefinitionTool
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        var details = new System.Text.StringBuilder();
+        var details = new StringBuilder();
         details.AppendLine($"## Symbol Not Found");
         details.AppendLine();
         details.AppendLine($"**File**: `{parameters.FilePath}`");
@@ -170,7 +233,7 @@ public class GoToDefinitionTool
         // 尝试读取文件内容显示该行
         try
         {
-            var document = workspaceManager.CurrentSolution?.Projects
+            var document = workspaceManager.GetCurrentSolution()?.Projects
                 .SelectMany(p => p.Documents)
                 .FirstOrDefault(d => d.FilePath == parameters.FilePath);
 

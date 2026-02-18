@@ -1,14 +1,15 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
+using CSharpMcp.Server.Models;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
-using Microsoft.CodeAnalysis;
 
 namespace CSharpMcp.Server.Tools.Optimization;
 
@@ -41,7 +42,7 @@ public class BatchGetSymbolsTool
 
             // Use a semaphore to limit concurrency
             var semaphore = new System.Threading.SemaphoreSlim(parameters.GetMaxConcurrency());
-            var tasks = new List<Task<BatchSymbolResult>>();
+            var tasks = new List<Task<SymbolBatchResult>>();
 
             foreach (var symbolParams in parameters.Symbols)
             {
@@ -53,20 +54,21 @@ public class BatchGetSymbolsTool
                         var (symbol, _) = await ResolveSymbolAsync(symbolParams, workspaceManager, symbolAnalyzer, cancellationToken);
                         if (symbol == null)
                         {
-                            return new BatchSymbolResult(
+                            return new SymbolBatchResult(
                                 GetSymbolName(symbolParams),
                                 null,
                                 "Symbol not found"
                             );
                         }
 
-                        var info = await symbolAnalyzer.ToSymbolInfoAsync(
+                        // Build symbol info directly
+                        var info = await BuildSymbolInfoAsync(
                             symbol,
                             parameters.DetailLevel,
                             parameters.IncludeBody ? parameters.GetBodyMaxLines() : null,
                             cancellationToken);
 
-                        return new BatchSymbolResult(
+                        return new SymbolBatchResult(
                             GetSymbolName(symbolParams),
                             info,
                             null
@@ -75,7 +77,7 @@ public class BatchGetSymbolsTool
                     catch (Exception ex)
                     {
                         logger.LogWarning(ex, "Error processing symbol");
-                        return new BatchSymbolResult(
+                        return new SymbolBatchResult(
                             GetSymbolName(symbolParams),
                             null,
                             ex.Message
@@ -90,7 +92,7 @@ public class BatchGetSymbolsTool
                 tasks.Add(task);
             }
 
-            var results = new List<BatchSymbolResult>();
+            var results = new List<SymbolBatchResult>();
             foreach (var task in tasks)
             {
                 var result = await task;
@@ -103,18 +105,103 @@ public class BatchGetSymbolsTool
             logger.LogDebug("Batch query completed: {Success} succeeded, {Errors} failed",
                 successCount, errorCount);
 
-            return new BatchGetSymbolsResponse(
-                parameters.Symbols.Count,
-                successCount,
-                errorCount,
-                results
-            ).ToMarkdown();
+            // Build Markdown directly
+            return BuildBatchResultsMarkdown(results, successCount, errorCount);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing BatchGetSymbolsTool");
             throw;
         }
+    }
+
+    private static string BuildBatchResultsMarkdown(
+        List<SymbolBatchResult> results,
+        int successCount,
+        int errorCount)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine($"## Batch Symbol Query Results");
+        sb.AppendLine();
+        sb.AppendLine($"**Total**: {results.Count} | **Success**: {successCount} | **Errors**: {errorCount}");
+        sb.AppendLine();
+
+        foreach (var result in results)
+        {
+            if (result.Error != null)
+            {
+                sb.AppendLine($"### ❌ `{result.Name}`");
+                sb.AppendLine();
+                sb.AppendLine($"**Error**: {result.Error}");
+            }
+            else if (result.Info != null)
+            {
+                sb.AppendLine($"### ✅ `{result.Name}`");
+                sb.AppendLine();
+                sb.Append(result.Info);
+            }
+            else
+            {
+                sb.AppendLine($"### ❓ `{result.Name}`");
+                sb.AppendLine();
+                sb.AppendLine("**No information available**");
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private static async Task<string> BuildSymbolInfoAsync(
+        ISymbol symbol,
+        DetailLevel detailLevel,
+        int? bodyMaxLines,
+        CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        var displayName = symbol.GetDisplayName();
+        var (startLine, endLine) = symbol.GetLineRange();
+        var filePath = symbol.GetFilePath();
+        var kind = symbol.GetDisplayKind();
+
+        sb.AppendLine($"**Type**: {char.ToUpper(kind[0]) + kind.Substring(1)}");
+
+        if (startLine > 0)
+        {
+            var fileName = System.IO.Path.GetFileName(filePath);
+            sb.AppendLine($"**Location**: `{fileName}:{startLine}`");
+        }
+
+        var signature = symbol.GetSignature();
+        if (!string.IsNullOrEmpty(signature))
+        {
+            sb.AppendLine($"**Signature**: `{signature}`");
+        }
+
+        if (detailLevel >= DetailLevel.Standard)
+        {
+            var summary = symbol.GetSummaryComment();
+            if (!string.IsNullOrEmpty(summary))
+            {
+                sb.AppendLine($"**Documentation**: {summary}");
+            }
+        }
+
+        if (bodyMaxLines.HasValue && bodyMaxLines.Value > 0)
+        {
+            var implementation = await symbol.GetFullImplementationAsync(bodyMaxLines, cancellationToken);
+            if (!string.IsNullOrEmpty(implementation))
+            {
+                sb.AppendLine();
+                sb.AppendLine("**Implementation**:");
+                sb.AppendLine("```csharp");
+                sb.AppendLine(implementation);
+                sb.AppendLine("```");
+            }
+        }
+
+        return sb.ToString();
     }
 
     private static string GetSymbolName(FileLocationParams p) =>
@@ -158,4 +245,13 @@ public class BatchGetSymbolsTool
 
         return (symbol, document);
     }
+
+    /// <summary>
+    /// Result of a single symbol query in batch operation
+    /// </summary>
+    private record SymbolBatchResult(
+        string Name,
+        string? Info,
+        string? Error
+    );
 }

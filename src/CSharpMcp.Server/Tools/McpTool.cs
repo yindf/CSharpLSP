@@ -61,7 +61,8 @@ public abstract class McpTool
     /// </summary>
     protected async Task<string?> ExtractContextCodeAsync(
         Microsoft.CodeAnalysis.Document document,
-        Models.SymbolLocation location,
+        int startLine,
+        int endLine,
         int contextLines,
         CancellationToken cancellationToken)
     {
@@ -70,8 +71,8 @@ public abstract class McpTool
             var sourceText = await document.GetTextAsync(cancellationToken);
             var lines = sourceText.Lines;
 
-            var startLine = Math.Max(0, location.StartLine - contextLines - 1);
-            var endLine = Math.Min(lines.Count - 1, location.EndLine + contextLines - 1);
+            var start = Math.Max(0, startLine - contextLines - 1);
+            var end = Math.Min(lines.Count - 1, endLine + contextLines - 1);
 
             if (startLine >= endLine)
                 return null;
@@ -91,3 +92,4 @@ public abstract class McpTool
         }
     }
 }
+

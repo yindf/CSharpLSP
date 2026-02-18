@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.Extensions.Logging;
-using CSharpMcp.Server.Cache;
 
 namespace CSharpMcp.Server.Roslyn;
 
@@ -18,19 +17,19 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
 {
     private readonly ILogger<WorkspaceManager> _logger;
     private readonly MSBuildWorkspace _workspace;
-    private readonly ICompilationCache _compilationCache;
     private readonly SemaphoreSlim _loadLock = new(1, 1);
     private Solution? _currentSolution;
     private string? _loadedPath;
     private DateTime _lastUpdate;
     private FileWatcherService? _fileWatcher;
     private int _isCompiling;
+    private SymbolCache _symbolCache;
 
     public WorkspaceManager(ILogger<WorkspaceManager> logger)
     {
         _logger = logger;
+        _symbolCache =  new SymbolCache();
         _workspace = MSBuildWorkspace.Create();
-        _compilationCache = CacheFactory.CreateCompilationCache();
 
         _workspace.WorkspaceFailed += (s, e) =>
         {
@@ -135,9 +134,6 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
 
             _loadedPath = Path.GetFullPath(path);
             _lastUpdate = DateTime.UtcNow;
-
-            // Clear cache when loading new workspace
-            _compilationCache.Clear();
 
             // Start file watcher for automatic workspace updates
             StartFileWatcher();
@@ -266,7 +262,8 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
     /// <summary>
     /// 获取编译
     /// </summary>
-    public async Task<Compilation?> GetCompilationAsync(string? projectPath = null, CancellationToken cancellationToken = default)
+    public async Task<Compilation?> GetCompilationAsync(string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
         if (_currentSolution == null)
         {
@@ -323,29 +320,22 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
             }
         }
 
-        var cacheKey = $"{project.Id.Id}";
-
-        return await _compilationCache.GetOrAddAsync(
-            cacheKey,
-            async () =>
+        try
+        {
+            var compilation = await project.GetCompilationAsync(cancellationToken);
+            if (compilation != null)
             {
-                try
-                {
-                    var compilation = await project.GetCompilationAsync(cancellationToken);
-                    if (compilation != null)
-                    {
-                        _logger.LogDebug("Created compilation for project: {ProjectName}", project.Name);
-                    }
-                    return compilation;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to create compilation for project: {ProjectName}", project.Name);
-                    return null;
-                }
-            },
-            cancellationToken
-        );
+                _logger.LogDebug("Created compilation for project: {ProjectName}", project.Name);
+            }
+
+            return compilation;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create compilation for project: {ProjectName}", project.Name);
+            return null;
+        }
+
     }
 
     /// <summary>
@@ -368,6 +358,55 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
             _logger.LogError(ex, "Failed to get semantic model for: {FilePath}", filePath);
             return null;
         }
+    }
+
+    public async Task<IEnumerable<ISymbol>> SearchSymbolsAsync(string query)
+    {
+        IEnumerable<ISymbol> symbols = Enumerable.Empty<ISymbol>();
+        static bool WildcardMatch(string input, string pattern)
+        {
+            int inputIndex = 0, patternIndex = 0;
+            int inputBackup = -1, patternBackup = -1;
+
+            while (inputIndex < input.Length)
+            {
+                if (patternIndex < pattern.Length &&
+                    (pattern[patternIndex] == '?' || pattern[patternIndex] == input[inputIndex]))
+                {
+                    inputIndex++;
+                    patternIndex++;
+                }
+                else if (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+                {
+                    patternBackup = ++patternIndex;
+                    inputBackup = inputIndex;
+                }
+                else if (patternBackup >= 0)
+                {
+                    patternIndex = patternBackup;
+                    inputIndex = ++inputBackup;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            while (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+                patternIndex++;
+
+            return patternIndex == pattern.Length;
+        }
+
+        foreach (var project in _workspace.CurrentSolution.Projects)
+        {
+            var compilation = await project.GetCompilationAsync();
+            if (compilation == null)
+                continue;
+            symbols = symbols.Concat(compilation.GetSymbolsWithName(symbol => WildcardMatch(symbol, query), SymbolFilter.All));
+        }
+
+        return symbols;
     }
 
     /// <summary>
@@ -403,7 +442,6 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
         }
 
         _logger.LogInformation("Refreshing workspace: {Path}", _loadedPath);
-        _compilationCache.Clear();
 
         try
         {
@@ -429,22 +467,6 @@ internal sealed partial class WorkspaceManager : IWorkspaceManager, IDisposable
         {
             _logger.LogError(ex, "Failed to refresh workspace");
         }
-    }
-
-    /// <summary>
-    /// 获取工作区状态
-    /// </summary>
-    public WorkspaceStatus GetStatus()
-    {
-        var cacheStats = _compilationCache.GetStatistics();
-
-        return new WorkspaceStatus(
-            _currentSolution != null,
-            _currentSolution?.Projects.Count() ?? 0,
-            _currentSolution?.Projects.Sum(p => p.DocumentIds.Count) ?? 0,
-            cacheStats.HitRate,
-            _lastUpdate
-        );
     }
 
     /// <summary>

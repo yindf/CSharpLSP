@@ -2,12 +2,14 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
 
@@ -58,67 +60,101 @@ public class FindReferencesTool
                 solution,
                 cancellationToken);
 
-            // Convert to reference info
-            var references = new List<Models.SymbolReference>();
-            var files = new HashSet<string>();
-            var sameFileCount = 0;
-            var targetFilePath = parameters.FilePath;
+            logger.LogDebug("Found {Count} references for {SymbolName}", referencedSymbols.Count, symbol.Name);
 
-            foreach (var refSym in referencedSymbols)
-            {
-                foreach (var loc in refSym.Locations)
-                {
-                    var location = new Models.SymbolLocation(
-                        loc.Document.FilePath,
-                        loc.Location.GetLineSpan().StartLinePosition.Line + 1,
-                        loc.Location.GetLineSpan().EndLinePosition.Line + 1,
-                        loc.Location.GetLineSpan().StartLinePosition.Character + 1,
-                        loc.Location.GetLineSpan().EndLinePosition.Character + 1
-                    );
-
-                    string? contextCode = null;
-                    string? lineText = null;
-
-                    if (parameters.IncludeContext)
-                    {
-                        contextCode = await ExtractContextCodeAsync(loc.Document, location, parameters.GetContextLines(), cancellationToken);
-                    }
-
-                    // Always extract line text
-                    lineText = await ExtractLineTextAsync(loc.Document, location.StartLine, cancellationToken);
-
-                    references.Add(new Models.SymbolReference(
-                        location,
-                        refSym.Definition?.Name ?? "Unknown",
-                        contextCode,
-                        lineText
-                    ));
-
-                    files.Add(location.FilePath);
-                    if (string.Equals(location.FilePath, targetFilePath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        sameFileCount++;
-                    }
-                }
-            }
-
-            var summary = new ReferenceSummary(
-                references.Count,
-                sameFileCount,
-                references.Count - sameFileCount,
-                files.ToList()
-            );
-
-            var symbolInfo = await symbolAnalyzer.ToSymbolInfoAsync(symbol, cancellationToken: cancellationToken);
-
-            logger.LogDebug("Found {Count} references for {SymbolName}", references.Count, symbol.Name);
-
-            return new FindReferencesResponse(symbolInfo, references, summary).ToMarkdown();
+            // Build Markdown directly
+            return await BuildReferencesMarkdownAsync(symbol, referencedSymbols, cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error executing FindReferencesTool");
             throw;
+        }
+    }
+
+    private static async Task<string> BuildReferencesMarkdownAsync(
+        ISymbol symbol,
+        IReadOnlyList<ReferencedSymbol> referencedSymbols,
+        CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        var displayName = symbol.GetDisplayName();
+
+        sb.AppendLine($"## References: `{displayName}`");
+        sb.AppendLine();
+        sb.AppendLine($"**Found {referencedSymbols.Count} reference location{(referencedSymbols.Count != 1 ? "s" : "")}**");
+        sb.AppendLine();
+
+        // Group by file
+        var groupedByFile = referencedSymbols
+            .SelectMany(rs => rs.Locations.Select(loc => new
+            {
+                ReferenceLocation = loc,
+                Definition = rs.Definition
+            }))
+            .GroupBy(r => r.ReferenceLocation.Document.FilePath);
+
+        foreach (var fileGroup in groupedByFile.OrderBy(g => g.Key))
+        {
+            var fileName = System.IO.Path.GetFileName(fileGroup.Key);
+            sb.AppendLine($"### {fileName}");
+            sb.AppendLine();
+
+            foreach (var refLoc in fileGroup.OrderBy(r => GetLineNumber(r.ReferenceLocation)))
+            {
+                var location = refLoc.ReferenceLocation.Location;
+                var lineSpan = location.GetLineSpan();
+                var startLine = lineSpan.StartLinePosition.Line + 1;
+                var endLine = lineSpan.EndLinePosition.Line + 1;
+
+                // Extract line text
+                var lineText = await ExtractLineTextAsync(refLoc.ReferenceLocation.Document, startLine, cancellationToken);
+
+                var lineRange = endLine > startLine ? $"L{startLine}-{endLine}" : $"L{startLine}";
+                sb.AppendLine($"- {lineRange}: {lineText?.Trim() ?? ""}");
+            }
+            sb.AppendLine();
+        }
+
+        // Summary
+        sb.AppendLine("**Summary**:");
+        long totalRefs = 0;
+        foreach (var rs in referencedSymbols)
+        {
+            totalRefs += rs.Locations.Count();
+        }
+        var filesAffected = groupedByFile.Count();
+
+        sb.AppendLine($"- **Total References**: {totalRefs}");
+        sb.AppendLine($"- **Files Affected**: {filesAffected}");
+
+        return sb.ToString();
+    }
+
+    private static int GetLineNumber(ReferenceLocation location)
+    {
+        return location.Location.GetLineSpan().StartLinePosition.Line + 1;
+    }
+
+    private static async Task<string?> ExtractLineTextAsync(
+        Document document,
+        int lineNumber,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sourceText = await document.GetTextAsync(cancellationToken);
+            var lines = sourceText.Lines;
+
+            if (lineNumber < 1 || lineNumber > lines.Count)
+                return null;
+
+            var lineIndex = lineNumber - 1;
+            return lines[lineIndex].ToString();
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -161,66 +197,12 @@ public class FindReferencesTool
         return (symbol, document);
     }
 
-    private static async Task<string?> ExtractLineTextAsync(
-        Document document,
-        int lineNumber,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var sourceText = await document.GetTextAsync(cancellationToken);
-            var lines = sourceText.Lines;
-
-            if (lineNumber < 1 || lineNumber > lines.Count)
-                return null;
-
-            var lineIndex = lineNumber - 1;
-            return lines[lineIndex].ToString();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static async Task<string?> ExtractContextCodeAsync(
-        Document document,
-        Models.SymbolLocation location,
-        int contextLines,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var sourceText = await document.GetTextAsync(cancellationToken);
-            var lines = sourceText.Lines;
-
-            var startLine = Math.Max(0, location.StartLine - contextLines - 1);
-            var endLine = Math.Min(lines.Count - 1, location.EndLine + contextLines - 1);
-
-            if (startLine >= endLine)
-                return null;
-
-            var text = sourceText.GetSubText(
-                Microsoft.CodeAnalysis.Text.TextSpan.FromBounds(
-                    lines[startLine].Start,
-                    lines[endLine].End
-                )
-            ).ToString();
-
-            return text;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static string BuildErrorDetails(
         FindReferencesParams parameters,
         IWorkspaceManager workspaceManager,
         CancellationToken cancellationToken)
     {
-        var details = new System.Text.StringBuilder();
+        var details = new StringBuilder();
         details.AppendLine($"## Symbol Not Found");
         details.AppendLine();
         details.AppendLine($"**File**: `{parameters.FilePath}`");
@@ -231,7 +213,7 @@ public class FindReferencesTool
         // 尝试读取文件内容显示该行
         try
         {
-            var document = workspaceManager.CurrentSolution?.Projects
+            var document = workspaceManager.GetCurrentSolution()?.Projects
                 .SelectMany(p => p.Documents)
                 .FirstOrDefault(d => d.FilePath == parameters.FilePath);
 

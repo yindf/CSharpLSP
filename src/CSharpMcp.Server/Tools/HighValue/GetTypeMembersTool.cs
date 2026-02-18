@@ -1,15 +1,14 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
-using System.Text;
 
 namespace CSharpMcp.Server.Tools.HighValue;
 
@@ -54,33 +53,13 @@ public class GetTypeMembersTool
                 return GetNotATypeHelpResponse(symbol.Name, symbol.Kind.ToString(), parameters.FilePath, parameters.LineNumber);
             }
 
-            // Get all members
-            var members = await GetMembersAsync(type, parameters.IncludeInherited, parameters.FilterKinds, cancellationToken);
-
-            // Convert to response format
-            var memberItems = members.Select(m => new MemberInfoItem(
-                m.Name,
-                m.Kind,
-                m.Accessibility,
-                m.IsStatic,
-                m.IsVirtual,
-                m.IsOverride,
-                m.IsAbstract,
-                m.Location,
-                m.ContainingType,
-                m.Signature?.ReturnType,
-                m.Signature?.Parameters.ToList() ?? new List<string>()
-            )).ToList();
-
-            var membersData = new TypeMembersData(
-                TypeName: type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                Members: memberItems,
-                TotalCount: members.Count
-            );
+            // Get all members as ISymbol
+            var members = GetMembers(type, parameters.IncludeInherited);
 
             logger.LogDebug("Retrieved {Count} members for: {TypeName}", members.Count, type.Name);
 
-            return new GetTypeMembersResponse(type.Name, membersData).ToMarkdown();
+            // Build Markdown directly
+            return BuildMembersMarkdown(type, members, parameters);
         }
         catch (Exception ex)
         {
@@ -89,13 +68,11 @@ public class GetTypeMembersTool
         }
     }
 
-    private static async Task<List<Models.SymbolInfo>> GetMembersAsync(
+    private static List<ISymbol> GetMembers(
         INamedTypeSymbol type,
-        bool includeInherited,
-        IReadOnlyList<Models.SymbolKind>? filterKinds,
-        CancellationToken cancellationToken)
+        bool includeInherited)
     {
-        var members = new List<Models.SymbolInfo>();
+        var members = new List<ISymbol>();
 
         // Get all members
         var allMembers = includeInherited
@@ -113,112 +90,69 @@ public class GetTypeMembersTool
                 continue;
             }
 
-            // Get the symbol kind
-            var symbolKind = member.Kind switch
-            {
-                SymbolKind.Method => Models.SymbolKind.Method,
-                SymbolKind.Property => Models.SymbolKind.Property,
-                SymbolKind.Field => Models.SymbolKind.Field,
-                SymbolKind.Event => Models.SymbolKind.Event,
-                SymbolKind.NamedType => member.ToDisplayString().EndsWith("Attribute)") ? Models.SymbolKind.Attribute : Models.SymbolKind.Class,
-                _ => Models.SymbolKind.Unknown
-            };
-
-            // Apply filter if specified
-            if (filterKinds != null && filterKinds.Count > 0 && !filterKinds.Contains(symbolKind))
-            {
-                continue;
-            }
-
-            // Get location
-            var location = member.Locations.FirstOrDefault();
-            var symbolLocation = new Models.SymbolLocation(
-                location?.SourceTree?.FilePath ?? "",
-                location?.GetLineSpan().StartLinePosition.Line + 1 ?? 0,
-                location?.GetLineSpan().EndLinePosition.Line + 1 ?? 0,
-                location?.GetLineSpan().StartLinePosition.Character + 1 ?? 0,
-                location?.GetLineSpan().EndLinePosition.Character + 1 ?? 0
-            );
-
             // Skip metadata members
+            var location = member.Locations.FirstOrDefault();
             if (location?.IsInMetadata == true)
             {
                 continue;
             }
 
-            var accessibility = member.DeclaredAccessibility switch
-            {
-                Microsoft.CodeAnalysis.Accessibility.Public => Models.Accessibility.Public,
-                Microsoft.CodeAnalysis.Accessibility.Internal => Models.Accessibility.Internal,
-                Microsoft.CodeAnalysis.Accessibility.Protected => Models.Accessibility.Protected,
-                Microsoft.CodeAnalysis.Accessibility.Private => Models.Accessibility.Private,
-                Microsoft.CodeAnalysis.Accessibility.ProtectedOrInternal => Models.Accessibility.ProtectedInternal,
-                Microsoft.CodeAnalysis.Accessibility.ProtectedAndInternal => Models.Accessibility.PrivateProtected,
-                _ => Models.Accessibility.NotApplicable
-            };
-
-            // Build signature based on member type
-            Models.SymbolSignature? signature = null;
-            bool isAsync = false;
-
-            if (member is IMethodSymbol method)
-            {
-                var methodParams = method.Parameters
-                    .Select(param => param.Type?.ToDisplayString() ?? "object")
-                    .ToList();
-
-                var typeParameters = method.TypeParameters
-                    .Select(tp => tp.Name)
-                    .ToList();
-
-                signature = new Models.SymbolSignature(
-                    method.Name,
-                    method.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                    method.ReturnType?.ToDisplayString() ?? "void",
-                    methodParams,
-                    typeParameters
-                );
-                isAsync = method.IsAsync;
-            }
-            else if (member is IPropertySymbol property)
-            {
-                var propertyParams = property.Parameters
-                    .Select(param => param.Type?.ToDisplayString() ?? "object")
-                    .ToList();
-
-                // Properties don't have TypeParameters
-                var typeParameters = Array.Empty<string>();
-
-                signature = new Models.SymbolSignature(
-                    property.Name,
-                    property.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                    property.Type?.ToDisplayString() ?? "object",
-                    propertyParams,
-                    typeParameters
-                );
-            }
-
-            var symbolInfo = new Models.SymbolInfo
-            {
-                Name = member.Name,
-                Kind = symbolKind,
-                Accessibility = accessibility,
-                Namespace = member.ContainingNamespace?.ToDisplayString() ?? "",
-                ContainingType = member.ContainingType?.ToDisplayString(
-                    SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "",
-                IsStatic = member.IsStatic,
-                IsVirtual = member.IsVirtual,
-                IsOverride = member.IsOverride,
-                IsAbstract = member.IsAbstract,
-                IsAsync = isAsync,
-                Location = symbolLocation,
-                Signature = signature
-            };
-
-            members.Add(symbolInfo);
+            members.Add(member);
         }
 
         return members;
+    }
+
+    private static string BuildMembersMarkdown(
+        INamedTypeSymbol type,
+        List<ISymbol> members,
+        GetTypeMembersParams parameters)
+    {
+        var sb = new StringBuilder();
+        var typeName = type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+
+        sb.AppendLine($"## Type Members: `{typeName}`");
+        sb.AppendLine();
+        sb.AppendLine($"**Total: {members.Count} member{(members.Count != 1 ? "s" : "")}**");
+        sb.AppendLine();
+
+        // Group by kind (use display kind for proper grouping of NamedTypes)
+        var groupedByKind = members.GroupBy(m => m.GetDisplayKind());
+
+        foreach (var kindGroup in groupedByKind.OrderBy(g => g.Key))
+        {
+            var title = SymbolExtensions.PluralizeKind(kindGroup.Key);
+            sb.AppendLine($"### {title}");
+            sb.AppendLine();
+
+            foreach (var member in kindGroup.OrderBy(m => m.GetDisplayName()))
+            {
+                var displayName = member.GetDisplayName();
+                var (startLine, endLine) = member.GetLineRange();
+                var displayKind = member.GetDisplayKind();
+                var accessibility = member.GetAccessibilityString();
+                var signature = member.GetSignature();
+
+                sb.Append($"- **{displayName}**");
+                sb.Append($" ({accessibility} {displayKind})");
+                if (startLine > 0)
+                {
+                    sb.Append($" L{startLine}-{endLine}");
+                }
+
+                if (!string.IsNullOrEmpty(signature))
+                {
+                    sb.AppendLine($" - `{signature}`");
+                }
+                else
+                {
+                    sb.AppendLine();
+                }
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
     }
 
     private static async Task<(ISymbol? symbol, Document document)> ResolveSymbolAsync(

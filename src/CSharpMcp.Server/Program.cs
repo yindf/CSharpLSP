@@ -32,7 +32,6 @@ public class Program
         builder.Services.AddSingleton<IWorkspaceManager, WorkspaceManager>();
         builder.Services.AddSingleton<ISymbolAnalyzer, SymbolAnalyzer>();
         builder.Services.AddSingleton<IInheritanceAnalyzer, InheritanceAnalyzer>();
-        builder.Services.AddSingleton<ICallGraphAnalyzer, CallGraphAnalyzer>();
 
         // Set up MCP Server with stdio transport
         // Tools are auto-discovered via [McpServerToolType] and [McpServerTool] attributes

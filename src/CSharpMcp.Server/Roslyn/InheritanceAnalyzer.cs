@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -41,12 +41,12 @@ public class InheritanceAnalyzer : IInheritanceAnalyzer
             .ToList();
 
         // Get derived types
-        List<Models.SymbolInfo>? derivedTypes = null;
+        IReadOnlyList<INamedTypeSymbol>? derivedTypes = null;
         if (includeDerived)
         {
             var derivedSymbols = await FindDerivedTypesAsync(type, solution, cancellationToken);
 
-            var derivedSet = new HashSet<INamedTypeSymbol>();
+            var derivedSet = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
 
             await CollectDerivedTypesBfsAsync(
                 derivedSymbols,
@@ -56,40 +56,20 @@ public class InheritanceAnalyzer : IInheritanceAnalyzer
                 0,
                 cancellationToken);
 
-            derivedTypes = new List<Models.SymbolInfo>();
-            foreach (var derived in derivedSet)
-            {
-                var info = await ToSymbolInfoAsync(derived, cancellationToken);
-                derivedTypes.Add(info);
-            }
-        }
-
-        // Convert to symbol info
-        var baseTypeInfos = new List<Models.SymbolInfo>();
-        foreach (var baseType in baseTypes)
-        {
-            var info = await ToSymbolInfoAsync(baseType, cancellationToken);
-            baseTypeInfos.Add(info);
-        }
-
-        var interfaceInfos = new List<Models.SymbolInfo>();
-        foreach (var iface in interfaces)
-        {
-            var info = await ToSymbolInfoAsync(iface, cancellationToken);
-            interfaceInfos.Add(info);
+            derivedTypes = derivedSet.ToList();
         }
 
         var depth = includeDerived ? maxDerivedDepth : 0;
 
         _logger.LogDebug(
             "Inheritance tree for {TypeName}: {BaseCount} base types, {InterfaceCount} interfaces, {DerivedCount} derived types",
-            type.ToDisplayString(), baseTypeInfos.Count, interfaceInfos.Count,
+            type.ToDisplayString(), baseTypes.Count, interfaces.Count,
             derivedTypes?.Count ?? 0);
 
         return new InheritanceTree(
-            baseTypeInfos,
-            interfaceInfos,
-            derivedTypes ?? (IReadOnlyList<Models.SymbolInfo>)Array.Empty<Models.SymbolInfo>(),
+            baseTypes,
+            interfaces,
+            derivedTypes ?? Array.Empty<INamedTypeSymbol>(),
             depth
         );
     }
@@ -334,7 +314,7 @@ public class InheritanceAnalyzer : IInheritanceAnalyzer
 
         while (current != null)
         {
-            if (current.Equals(baseType))
+            if (current.Equals(baseType, SymbolEqualityComparer.Default))
             {
                 return true;
             }
@@ -342,7 +322,7 @@ public class InheritanceAnalyzer : IInheritanceAnalyzer
             // Check interfaces
             foreach (var iface in current.AllInterfaces)
             {
-                if (iface.Equals(baseType))
+                if (iface.Equals(baseType, SymbolEqualityComparer.Default))
                 {
                     return true;
                 }
@@ -352,49 +332,5 @@ public class InheritanceAnalyzer : IInheritanceAnalyzer
         }
 
         return false;
-    }
-
-    private async Task<Models.SymbolInfo> ToSymbolInfoAsync(
-        INamedTypeSymbol type,
-        CancellationToken cancellationToken)
-    {
-        var location = type.Locations.FirstOrDefault();
-        var symbolLocation = new Models.SymbolLocation(
-            location?.SourceTree?.FilePath ?? "",
-            location?.GetLineSpan().StartLinePosition.Line + 1 ?? 0,
-            location?.GetLineSpan().EndLinePosition.Line + 1 ?? 0,
-            location?.GetLineSpan().StartLinePosition.Character + 1 ?? 0,
-            location?.GetLineSpan().EndLinePosition.Character + 1 ?? 0
-        );
-
-        return new Models.SymbolInfo
-        {
-            Name = type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-            Kind = type.TypeKind switch
-            {
-                TypeKind.Class => Models.SymbolKind.Class,
-                TypeKind.Interface => Models.SymbolKind.Interface,
-                TypeKind.Struct => Models.SymbolKind.Struct,
-                TypeKind.Enum => Models.SymbolKind.Enum,
-                TypeKind.Delegate => Models.SymbolKind.Delegate,
-                _ => Models.SymbolKind.Unknown
-            },
-            Accessibility = type.DeclaredAccessibility switch
-            {
-                Microsoft.CodeAnalysis.Accessibility.Public => Models.Accessibility.Public,
-                Microsoft.CodeAnalysis.Accessibility.Internal => Models.Accessibility.Internal,
-                Microsoft.CodeAnalysis.Accessibility.Protected => Models.Accessibility.Protected,
-                Microsoft.CodeAnalysis.Accessibility.Private => Models.Accessibility.Private,
-                Microsoft.CodeAnalysis.Accessibility.ProtectedOrInternal => Models.Accessibility.ProtectedInternal,
-                Microsoft.CodeAnalysis.Accessibility.ProtectedAndInternal => Models.Accessibility.PrivateProtected,
-                _ => Models.Accessibility.NotApplicable
-            },
-            Namespace = type.ContainingNamespace?.ToDisplayString() ?? "",
-            ContainingType = type.ContainingType?.ToDisplayString(
-                SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "",
-            IsStatic = type.IsStatic,
-            IsAbstract = type.IsAbstract,
-            Location = symbolLocation
-        };
     }
 }

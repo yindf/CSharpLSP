@@ -1,4 +1,4 @@
-namespace CSharpMcp.Server.Roslyn;
+﻿namespace CSharpMcp.Server.Roslyn;
 
 /// <summary>
 /// 文件变化类型
@@ -19,9 +19,4 @@ public enum FileChangeType
     /// 源代码文件 (.cs)
     /// </summary>
     SourceFile,
-
-    /// <summary>
-    /// 配置文件 (.editorconfig, etc.)
-    /// </summary>
-    Config
 }

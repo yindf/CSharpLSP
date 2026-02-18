@@ -1,12 +1,13 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using CSharpMcp.Server.Models.Output;
 using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
 
@@ -53,32 +54,10 @@ public class GetSymbolsTool
 
             var symbols = await symbolAnalyzer.GetDocumentSymbolsAsync(document, cancellationToken);
 
-            // Apply filters
-            if (parameters.FilterKinds != null && parameters.FilterKinds.Count > 0)
-            {
-                var filterSet = new HashSet<Models.SymbolKind>(parameters.FilterKinds);
-                symbols = symbols.Where(s => filterSet.Contains(MapSymbolKind(s.Kind))).ToList();
-            }
+            logger.LogDebug("Found {Count} symbols in {FilePath}", symbols.Count, parameters.FilePath);
 
-            // Convert to SymbolInfo
-            var symbolInfos = new List<Models.SymbolInfo>();
-            foreach (var symbol in symbols)
-            {
-                var info = await symbolAnalyzer.ToSymbolInfoAsync(
-                    symbol,
-                    parameters.DetailLevel,
-                    parameters.IncludeBody ? parameters.BodyMaxLines : null,
-                    cancellationToken);
-
-                symbolInfos.Add(info);
-            }
-
-            logger.LogDebug("Found {Count} symbols in {FilePath}", symbolInfos.Count, parameters.FilePath);
-
-            return new GetSymbolsResponse(
-                parameters.FilePath,
-                symbolInfos,
-                symbols.Count).ToMarkdown();
+            // Build Markdown directly
+            return await BuildSymbolsMarkdownAsync(parameters.FilePath, symbols, parameters, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -87,16 +66,45 @@ public class GetSymbolsTool
         }
     }
 
-    private static Models.SymbolKind MapSymbolKind(Microsoft.CodeAnalysis.SymbolKind kind)
+    private static async Task<string> BuildSymbolsMarkdownAsync(
+        string filePath,
+        IReadOnlyList<ISymbol> symbols,
+        GetSymbolsParams parameters,
+        CancellationToken cancellationToken)
     {
-        return kind switch
+        var sb = new StringBuilder();
+        var fileName = System.IO.Path.GetFileName(filePath);
+
+        sb.AppendLine($"## Symbols: {fileName}");
+        sb.AppendLine($"**Total: {symbols.Count} symbol{(symbols.Count != 1 ? "s" : "")}**");
+        sb.AppendLine();
+
+        foreach (var symbol in symbols)
         {
-            Microsoft.CodeAnalysis.SymbolKind.NamedType => Models.SymbolKind.Class,
-            Microsoft.CodeAnalysis.SymbolKind.Method => Models.SymbolKind.Method,
-            Microsoft.CodeAnalysis.SymbolKind.Property => Models.SymbolKind.Property,
-            Microsoft.CodeAnalysis.SymbolKind.Field => Models.SymbolKind.Field,
-            Microsoft.CodeAnalysis.SymbolKind.Event => Models.SymbolKind.Event,
-            _ => Models.SymbolKind.Method
-        };
+            var displayName = symbol.GetDisplayName();
+            var (startLine, endLine) = symbol.GetLineRange();
+            var kind = symbol.GetDisplayKind();
+
+            sb.Append($"- **{displayName}** ({kind}) L{startLine}-{endLine}");
+
+            // 根据 DetailLevel 决定输出
+            if (parameters.DetailLevel >= Models.DetailLevel.Summary)
+            {
+                var signature = symbol.GetSignature();
+                if (!string.IsNullOrEmpty(signature))
+                    sb.Append($" - `{signature}`");
+            }
+
+            if (parameters.DetailLevel >= Models.DetailLevel.Standard)
+            {
+                var summary = symbol.GetSummaryComment();
+                if (!string.IsNullOrEmpty(summary))
+                    sb.Append($" // {summary}");
+            }
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
     }
 }

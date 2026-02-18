@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -8,10 +8,6 @@ using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.Logging;
-using CSharpMcp.Server.Models;
-using ModelsSymbolInfo = CSharpMcp.Server.Models.SymbolInfo;
-using ModelsSymbolKind = CSharpMcp.Server.Models.SymbolKind;
-using ModelsAccessibility = CSharpMcp.Server.Models.Accessibility;
 using RoslynReferencedSymbol = Microsoft.CodeAnalysis.FindSymbols.ReferencedSymbol;
 using RoslynSymbolKind = Microsoft.CodeAnalysis.SymbolKind;
 using RoslynAccessibility = Microsoft.CodeAnalysis.Accessibility;
@@ -206,7 +202,16 @@ internal sealed partial class SymbolAnalyzer : ISymbolAnalyzer
 
             if (exactMatches.Count > 0)
             {
-                return exactMatches;
+                if (approximateLineNumber.HasValue)
+                {
+                    return exactMatches.OrderBy(s => Math.Abs(
+                            s.Locations.FirstOrDefault()?.GetLineSpan().StartLinePosition.Line + 1 ?? 0 - approximateLineNumber.Value))
+                        .ToList();
+                }
+                else
+                {
+                    return exactMatches;
+                }
             }
 
             // Case-insensitive match
@@ -216,7 +221,16 @@ internal sealed partial class SymbolAnalyzer : ISymbolAnalyzer
 
             if (caseInsensitiveMatches.Count > 0)
             {
-                return caseInsensitiveMatches;
+                if (approximateLineNumber.HasValue)
+                {
+                    return caseInsensitiveMatches.OrderBy(s => Math.Abs(
+                            s.Locations.FirstOrDefault()?.GetLineSpan().StartLinePosition.Line + 1 ?? 0 - approximateLineNumber.Value))
+                        .ToList();
+                }
+                else
+                {
+                    return caseInsensitiveMatches;
+                }
             }
 
             // Partial match
@@ -229,7 +243,7 @@ internal sealed partial class SymbolAnalyzer : ISymbolAnalyzer
             {
                 partialMatches = partialMatches
                     .OrderBy(s => Math.Abs(
-                        GetLineNumber(s) - approximateLineNumber.Value))
+                        s.Locations.FirstOrDefault()?.GetLineSpan().StartLinePosition.Line + 1 ?? 0 - approximateLineNumber.Value))
                     .ToList();
             }
 
@@ -264,132 +278,6 @@ internal sealed partial class SymbolAnalyzer : ISymbolAnalyzer
             _logger.LogError(ex, "Failed to find references for symbol: {SymbolName}", symbol.Name);
             return [];
         }
-    }
-
-    /// <summary>
-    /// 获取符号的定义位置
-    /// </summary>
-    public async Task<SymbolLocation?> GetSymbolLocationAsync(
-        ISymbol symbol,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            // Try to get the syntax node for accurate span information
-            var syntaxRef = symbol.DeclaringSyntaxReferences.FirstOrDefault();
-            if (syntaxRef != null)
-            {
-                var syntaxNode = await syntaxRef.GetSyntaxAsync(cancellationToken);
-                if (syntaxNode != null)
-                {
-                    var lineSpan = syntaxNode.SyntaxTree.GetLineSpan(syntaxNode.Span);
-                    return new SymbolLocation(
-                        syntaxNode.SyntaxTree?.FilePath ?? "",
-                        lineSpan.StartLinePosition.Line + 1,
-                        lineSpan.EndLinePosition.Line + 1,
-                        lineSpan.StartLinePosition.Character + 1,
-                        lineSpan.EndLinePosition.Character + 1
-                    );
-                }
-            }
-
-            // Fallback to location from symbol
-            var locations = symbol.Locations;
-            var sourceLocation = locations.FirstOrDefault(l => l.IsInSource);
-            if (sourceLocation != null)
-            {
-                var lineSpan = sourceLocation.GetLineSpan();
-                return new SymbolLocation(
-                    sourceLocation.SourceTree?.FilePath ?? "",
-                    lineSpan.StartLinePosition.Line + 1,
-                    lineSpan.EndLinePosition.Line + 1,
-                    lineSpan.StartLinePosition.Character + 1,
-                    lineSpan.EndLinePosition.Character + 1
-                );
-            }
-
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get location for symbol: {SymbolName}", symbol.Name);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 转换为 SymbolInfo 模型
-    /// </summary>
-    public async Task<ModelsSymbolInfo> ToSymbolInfoAsync(
-        ISymbol symbol,
-        DetailLevel detailLevel = DetailLevel.Summary,
-        int? bodyMaxLines = null,
-        CancellationToken cancellationToken = default)
-    {
-        var location = await GetSymbolLocationAsync(symbol, cancellationToken) ??
-            new SymbolLocation("", 0, 0, 0, 0);
-
-        var containingType = symbol.ContainingType?.Name ?? "";
-        var namespaceName = symbol.ContainingNamespace?.ToString() ?? "";
-
-        ModelsSymbolInfo result = new()
-        {
-            Name = symbol.Name,
-            Kind = MapSymbolKind(symbol.Kind),
-            Location = location,
-            ContainingType = containingType,
-            Namespace = namespaceName,
-            IsStatic = symbol.IsStatic,
-            IsVirtual = symbol.IsVirtual,
-            IsOverride = symbol.IsOverride,
-            IsAbstract = symbol.IsAbstract,
-            Accessibility = MapAccessibility(symbol.DeclaredAccessibility)
-        };
-
-        // Add signature for summary and above
-        if (detailLevel >= DetailLevel.Summary)
-        {
-            result = result with
-            {
-                Signature = CreateSignature(symbol)
-            };
-        }
-
-        // Add documentation for standard and above
-        if (detailLevel >= DetailLevel.Standard)
-        {
-            var doc = await GetDocumentationCommentAsync(symbol, cancellationToken);
-            result = result with
-            {
-                Documentation = doc
-            };
-        }
-
-        // Add source code for full level
-        if (detailLevel == DetailLevel.Full)
-        {
-            var fullMethodDecl = await ExtractFullMethodDeclarationAsync(symbol, bodyMaxLines, cancellationToken);
-            if (fullMethodDecl != null)
-            {
-                result = result with
-                {
-                    FullDeclaration = fullMethodDecl.FullMethodText,
-                    Attributes = fullMethodDecl.Attributes,
-                    SourceCode = fullMethodDecl.Body  // Store body in SourceCode for backward compatibility
-                };
-            }
-            else
-            {
-                // Fallback to old method if full extraction fails
-                var sourceCode = await ExtractSourceCodeAsync(symbol, true, bodyMaxLines, cancellationToken);
-                result = result with
-                {
-                    SourceCode = sourceCode
-                };
-            }
-        }
-
-        return result;
     }
 
     /// <summary>
@@ -554,374 +442,5 @@ internal sealed partial class SymbolAnalyzer : ISymbolAnalyzer
             _logger.LogError(ex, "Failed to extract source code for symbol: {SymbolName}", symbol.Name);
             return null;
         }
-    }
-
-    /// <summary>
-    /// 提取完整的方法声明（包括 attributes、注释、签名、body）
-    /// </summary>
-    public async Task<FullMethodDeclaration?> ExtractFullMethodDeclarationAsync(
-        ISymbol symbol,
-        int? maxLines,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var syntaxRef = symbol.DeclaringSyntaxReferences.FirstOrDefault();
-            if (syntaxRef == null)
-            {
-                return null;
-            }
-
-            var syntaxNode = await syntaxRef.GetSyntaxAsync(cancellationToken);
-            if (syntaxNode == null)
-            {
-                return null;
-            }
-
-            var syntaxTree = syntaxNode.SyntaxTree;
-            var sourceText = await syntaxTree.GetTextAsync(cancellationToken);
-            var lines = sourceText.Lines;
-
-            // Extract attributes
-            var attributes = ExtractAttributes(syntaxNode);
-
-            // Extract documentation (leading trivia) - do this BEFORE getting full span
-            var documentation = ExtractDocumentationTrivia(syntaxNode);
-
-            // Find the full span including attributes AND documentation
-            var fullSpan = GetFullSpanIncludingAttributesAndDocumentation(syntaxNode);
-
-            // Extract signature (from method start to body start)
-            var signature = ExtractSignature(syntaxNode);
-
-            // Extract body
-            var body = await ExtractBodyAsync(syntaxNode, maxLines, cancellationToken);
-
-            // Get full method text
-            var startLine = lines.GetLineFromPosition(fullSpan.Start).LineNumber;
-            var endLine = lines.GetLineFromPosition(fullSpan.End).LineNumber;
-
-            // Apply max lines limit
-            if (maxLines.HasValue && (endLine - startLine + 1) > maxLines.Value)
-            {
-                endLine = startLine + maxLines.Value - 1;
-            }
-
-            var fullMethodText = new StringBuilder();
-            for (int i = startLine; i <= endLine; i++)
-            {
-                var line = lines[i];
-                var lineText = line.ToString();
-                fullMethodText.AppendLine(lineText.TrimEnd());
-            }
-
-            return new FullMethodDeclaration(
-                fullMethodText.ToString().Trim(),
-                attributes,
-                documentation,
-                signature,
-                body ?? ""
-            );
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to extract full method declaration for symbol: {SymbolName}", symbol.Name);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 提取节点上的所有属性
-    /// </summary>
-    private static IReadOnlyList<string> ExtractAttributes(SyntaxNode syntaxNode)
-    {
-        var attributes = new List<string>();
-
-        // Check for AttributeLists based on node type
-        if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BaseMethodDeclarationSyntax methodSyntax)
-        {
-            foreach (var attributeList in methodSyntax.AttributeLists)
-            {
-                foreach (var attribute in attributeList.Attributes)
-                {
-                    attributes.Add(attribute.ToString());
-                }
-            }
-        }
-        else if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BasePropertyDeclarationSyntax propertySyntax)
-        {
-            foreach (var attributeList in propertySyntax.AttributeLists)
-            {
-                foreach (var attribute in attributeList.Attributes)
-                {
-                    attributes.Add(attribute.ToString());
-                }
-            }
-        }
-
-        return attributes;
-    }
-
-    /// <summary>
-    /// 提取文档注释（XML 注释）
-    /// </summary>
-    private static string? ExtractDocumentationTrivia(Microsoft.CodeAnalysis.SyntaxNode syntaxNode)
-    {
-        var triviaList = syntaxNode.GetLeadingTrivia()
-            .Reverse()
-            .TakeWhile(t => t.Kind() is Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia ||
-                           t.Kind() is Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia ||
-                           t.Kind() is Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineDocumentationCommentTrivia ||
-                           t.Kind() is Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineDocumentationCommentTrivia ||
-                           t.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.EndOfLineTrivia))
-            .Reverse();
-
-        if (!triviaList.Any())
-            return null;
-
-        var docComments = new List<string>();
-        foreach (var trivia in triviaList)
-        {
-            var text = trivia.ToString().Trim();
-            if (string.IsNullOrWhiteSpace(text) || text == "//" || text == "/*" || text == "*/")
-                continue;
-
-            // Clean up documentation comment markers
-            if (text.StartsWith("///"))
-                docComments.Add(text.Substring(3).Trim());
-            else if (text.StartsWith("//"))
-                docComments.Add(text.Substring(2).Trim());
-            else if (text.StartsWith("/*") && text.EndsWith("*/"))
-                docComments.Add(text.Substring(2, text.Length - 4).Trim());
-            else
-                docComments.Add(text);
-        }
-
-        return docComments.Count > 0 ? string.Join("\n", docComments) : null;
-    }
-
-    /// <summary>
-    /// 获取完整的 span（包括属性和文档注释）
-    /// </summary>
-    private static TextSpan GetFullSpanIncludingAttributesAndDocumentation(SyntaxNode syntaxNode)
-    {
-        var fullStart = syntaxNode.Span.Start;
-
-        // Check for AttributeLists based on node type
-        if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BaseMethodDeclarationSyntax methodSyntax)
-        {
-            if (methodSyntax.AttributeLists.Count > 0)
-            {
-                fullStart = methodSyntax.AttributeLists[0].FullSpan.Start;
-            }
-
-            // Check for documentation comments before attributes
-            var leadingTrivia = methodSyntax.GetLeadingTrivia();
-            foreach (var trivia in leadingTrivia)
-            {
-                if (trivia.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineDocumentationCommentTrivia) ||
-                    trivia.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineDocumentationCommentTrivia))
-                {
-                    if (trivia.FullSpan.Start < fullStart)
-                    {
-                        fullStart = trivia.FullSpan.Start;
-                    }
-                }
-            }
-        }
-        else if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BasePropertyDeclarationSyntax propertySyntax)
-        {
-            if (propertySyntax.AttributeLists.Count > 0)
-            {
-                fullStart = propertySyntax.AttributeLists[0].FullSpan.Start;
-            }
-
-            // Check for documentation comments before attributes
-            var leadingTrivia = propertySyntax.GetLeadingTrivia();
-            foreach (var trivia in leadingTrivia)
-            {
-                if (trivia.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineDocumentationCommentTrivia) ||
-                    trivia.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineDocumentationCommentTrivia))
-                {
-                    if (trivia.FullSpan.Start < fullStart)
-                    {
-                        fullStart = trivia.FullSpan.Start;
-                    }
-                }
-            }
-        }
-
-        return TextSpan.FromBounds(fullStart, syntaxNode.Span.End);
-    }
-
-    /// <summary>
-    /// 提取方法签名
-    /// </summary>
-    private static string ExtractSignature(Microsoft.CodeAnalysis.SyntaxNode syntaxNode)
-    {
-        if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BaseMethodDeclarationSyntax methodSyntax)
-        {
-            // From method start to end of parameter list (or semicolon for abstract/interface methods)
-            var signatureEnd = methodSyntax.Body != null
-                ? methodSyntax.ParameterList.Span.End
-                : methodSyntax.SemicolonToken != default && !methodSyntax.SemicolonToken.IsMissing
-                    ? methodSyntax.SemicolonToken.Span.End
-                    : methodSyntax.Span.End;
-
-            var signatureSpan = TextSpan.FromBounds(methodSyntax.Span.Start, signatureEnd);
-            return syntaxNode.SyntaxTree.GetText().ToString(signatureSpan).Trim();
-        }
-        else if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BasePropertyDeclarationSyntax propertySyntax)
-        {
-            // For properties, get up to the accessor list or end
-            var signatureEnd = propertySyntax.AccessorList != null
-                ? propertySyntax.AccessorList.Span.Start
-                : propertySyntax.Span.End;
-
-            var signatureSpan = TextSpan.FromBounds(propertySyntax.Span.Start, signatureEnd);
-            return syntaxNode.SyntaxTree.GetText().ToString(signatureSpan).Trim();
-        }
-
-        return syntaxNode.ToString();
-    }
-
-    /// <summary>
-    /// 提取方法 body
-    /// </summary>
-    private static async Task<string?> ExtractBodyAsync(
-        Microsoft.CodeAnalysis.SyntaxNode syntaxNode,
-        int? maxLines,
-        CancellationToken cancellationToken)
-    {
-        if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BaseMethodDeclarationSyntax methodSyntax)
-        {
-            var body = methodSyntax.Body;
-            if (body == null)
-            {
-                // Abstract or interface method
-                return null;
-            }
-
-            var syntaxTree = syntaxNode.SyntaxTree;
-            var sourceText = await syntaxTree.GetTextAsync(cancellationToken);
-            var lines = sourceText.Lines;
-
-            // Get content inside the braces
-            var openBrace = body.ChildTokens().FirstOrDefault(t => t.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.OpenBraceToken));
-            var closeBrace = body.ChildTokens().LastOrDefault(t => t.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CloseBraceToken));
-
-            TextSpan bodySpan;
-            if (openBrace != default && closeBrace != default)
-            {
-                bodySpan = TextSpan.FromBounds(openBrace.Span.End, closeBrace.Span.Start);
-            }
-            else
-            {
-                bodySpan = body.Span;
-            }
-
-            var startLine = lines.GetLineFromPosition(bodySpan.Start).LineNumber;
-            var endLine = lines.GetLineFromPosition(bodySpan.End).LineNumber;
-
-            // Apply max lines limit
-            if (maxLines.HasValue && (endLine - startLine + 1) > maxLines.Value)
-            {
-                endLine = startLine + maxLines.Value - 1;
-            }
-
-            var sb = new StringBuilder();
-            for (int i = startLine; i <= endLine; i++)
-            {
-                var line = lines[i];
-                var lineText = line.ToString();
-                sb.AppendLine(lineText.TrimEnd());
-            }
-
-            return sb.ToString().Trim();
-        }
-        else if (syntaxNode is Microsoft.CodeAnalysis.CSharp.Syntax.BasePropertyDeclarationSyntax propertySyntax)
-        {
-            var accessorList = propertySyntax.AccessorList;
-            if (accessorList == null)
-            {
-                return null;
-            }
-
-            return accessorList.ToString();
-        }
-
-        return null;
-    }
-
-    private static ModelsSymbolKind MapSymbolKind(RoslynSymbolKind kind)
-    {
-        return kind switch
-        {
-            RoslynSymbolKind.NamedType => ModelsSymbolKind.Class,
-            RoslynSymbolKind.Method => ModelsSymbolKind.Method,
-            RoslynSymbolKind.Property => ModelsSymbolKind.Property,
-            RoslynSymbolKind.Field => ModelsSymbolKind.Field,
-            RoslynSymbolKind.Event => ModelsSymbolKind.Event,
-            _ => ModelsSymbolKind.Method
-        };
-    }
-
-    private static ModelsAccessibility MapAccessibility(RoslynAccessibility accessibility)
-    {
-        return accessibility switch
-        {
-            RoslynAccessibility.Public => ModelsAccessibility.Public,
-            RoslynAccessibility.Internal => ModelsAccessibility.Internal,
-            RoslynAccessibility.Protected => ModelsAccessibility.Protected,
-            RoslynAccessibility.ProtectedOrInternal => ModelsAccessibility.ProtectedInternal,
-            RoslynAccessibility.ProtectedAndInternal => ModelsAccessibility.PrivateProtected,
-            RoslynAccessibility.Private => ModelsAccessibility.Private,
-            _ => ModelsAccessibility.Private
-        };
-    }
-
-    private static SymbolSignature CreateSignature(ISymbol symbol)
-    {
-        var parameters = new List<string>();
-        var typeParameters = new List<string>();
-        string? returnType = null;
-
-        switch (symbol)
-        {
-            case IMethodSymbol method:
-                returnType = method.ReturnType.ToDisplayString();
-                parameters = method.Parameters.Select(p => p.ToDisplayString()).ToList();
-                typeParameters = method.TypeParameters.Select(tp => tp.Name).ToList();
-                break;
-            case IPropertySymbol property:
-                returnType = property.Type.ToDisplayString();
-                parameters = property.Parameters.Select(p => p.ToDisplayString()).ToList();
-                break;
-            case IEventSymbol evt:
-                returnType = evt.Type.ToDisplayString();
-                break;
-            case IFieldSymbol field:
-                returnType = field.Type.ToDisplayString();
-                break;
-        }
-
-        return new SymbolSignature(
-            symbol.Name,
-            symbol.ToDisplayString(),
-            returnType,
-            parameters,
-            typeParameters
-        );
-    }
-
-    private static int GetLineNumber(ISymbol symbol)
-    {
-        var locations = symbol.Locations;
-        var sourceLocation = locations.FirstOrDefault(l => l.IsInSource);
-        if (sourceLocation != null)
-        {
-            return sourceLocation.GetLineSpan().StartLinePosition.Line + 1;
-        }
-        return 0;
     }
 }
