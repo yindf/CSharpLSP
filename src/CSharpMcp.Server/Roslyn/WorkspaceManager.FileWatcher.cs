@@ -85,7 +85,8 @@ internal sealed partial class WorkspaceManager
             do
             {
                 // 获取最新的 Solution（不需要锁，Solution 是不可变的）
-                var currentSolution = _currentSolution;
+                // 优先使用 workspace 的 CurrentSolution，因为它是最权威的状态
+                var currentSolution = _workspace.CurrentSolution;
 
                 if (currentSolution == null)
                 {

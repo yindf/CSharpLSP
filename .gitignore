@@ -58,3 +58,19 @@ project.fragment.lock.json
 .DS_Store
 Thumbs.db
 mcp_*.log
+
+## Test scripts
+test_*.py
+test_*.txt
+generate_test_report_with_workspace.py
+show_*.py
+run_inspector.bat
+
+## Temporary workspaces
+temp_workspace_manager.cs
+
+## Test projects
+TestUnitySolution.*
+
+## Published output (keep published directory but ignore contents)
+publish/*
