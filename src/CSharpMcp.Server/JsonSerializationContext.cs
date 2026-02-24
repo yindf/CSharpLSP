@@ -1,8 +1,10 @@
-﻿using System.Text.Json;
+﻿using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using CSharpMcp.Server.Models;
 using CSharpMcp.Server.Models.Output;
+using CSharpMcp.Server.Models.Tools;
 using CSharpMcp.Server.Roslyn;
 
 namespace CSharpMcp.Server;
@@ -12,6 +14,11 @@ namespace CSharpMcp.Server;
 /// Includes all parameter types and response types used by MCP tools.
 /// </summary>
 
+// Parameter types
+[JsonSerializable(typeof(FileLocationParams))]
+[JsonSerializable(typeof(LoadWorkspaceParams))]
+[JsonSerializable(typeof(IReadOnlyList<FileLocationParams>))]
+
 // Response types (only remaining types after refactoring)
 [JsonSerializable(typeof(GetDiagnosticsResponse))]
 [JsonSerializable(typeof(DiagnosticItem))]
@@ -19,8 +26,9 @@ namespace CSharpMcp.Server;
 [JsonSerializable(typeof(ErrorResponse))]
 [JsonSerializable(typeof(LoadWorkspaceResponse))]
 
-// Enums (from Tools namespace)
+// Enums
 [JsonSerializable(typeof(WorkspaceKind))]
+[JsonSerializable(typeof(DiagnosticSeverity))]
 
 public partial class JsonSerializationContext : JsonSerializerContext
 {
@@ -33,10 +41,11 @@ public static class McpJsonOptions
 {
     /// <summary>
     /// Gets the configured JsonSerializerOptions with source generation support.
+    /// Combines source-generated context with reflection fallback for primitive types.
     /// </summary>
     public static JsonSerializerOptions Options { get; } = new JsonSerializerOptions
     {
-        TypeInfoResolver = JsonSerializationContext.Default,
+        TypeInfoResolver = JsonTypeInfoResolver.Combine(JsonSerializationContext.Default, JsonSerializerOptions.Default.TypeInfoResolver!),
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
     };
